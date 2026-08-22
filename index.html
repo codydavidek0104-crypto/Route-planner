@@ -1,19 +1,193 @@
  <!DOCTYPE html>
 
-<html>
+<html lang="en">
 
 <head>
 
+  <meta charset="UTF-8">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
   <title>D7 Route</title>
+
+  <style>
+
+    * {
+
+      box-sizing: border-box;
+
+    }
+
+    body {
+
+      margin: 0;
+
+      font-family: Arial, sans-serif;
+
+      background: #f4f6f8;
+
+      color: #1f2937;
+
+    }
+
+    .app {
+
+      max-width: 800px;
+
+      margin: 0 auto;
+
+      padding: 30px 20px;
+
+    }
+
+    h1 {
+
+      margin-bottom: 5px;
+
+    }
+
+    .subtitle {
+
+      margin-top: 0;
+
+      color: #667085;
+
+    }
+
+    .card {
+
+      background: white;
+
+      padding: 20px;
+
+      border-radius: 12px;
+
+      margin-top: 25px;
+
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+
+    }
+
+    label {
+
+      display: block;
+
+      font-weight: bold;
+
+      margin-bottom: 8px;
+
+    }
+
+    input {
+
+      width: 100%;
+
+      padding: 14px;
+
+      border: 1px solid #ccc;
+
+      border-radius: 8px;
+
+      font-size: 16px;
+
+    }
+
+    button {
+
+      width: 100%;
+
+      margin-top: 12px;
+
+      padding: 14px;
+
+      border: none;
+
+      border-radius: 8px;
+
+      font-size: 16px;
+
+      font-weight: bold;
+
+      cursor: pointer;
+
+    }
+
+    .add-button {
+
+      background: #1f2937;
+
+      color: white;
+
+    }
+
+    .optimize-button {
+
+      background: #2563eb;
+
+      color: white;
+
+      margin-top: 20px;
+
+    }
+
+    .stop-count {
+
+      margin-top: 15px;
+
+      color: #667085;
+
+      text-align: center;
+
+    }
+
+  </style>
 
 </head>
 
 <body>
 
-  <h1>Welcome to D7 Route!</h1>
+  <main class="app">
 
-  <p>Route planning starts here.</p>
+    <h1>D7 Route</h1>
+
+    <p class="subtitle">Plan smarter routes. Save time and fuel.</p>
+
+    <section class="card">
+
+      <label for="address">Add a stop</label>
+
+      <input
+
+        id="address"
+
+        type="text"
+
+        placeholder="Enter an address"
+
+      >
+
+      <button class="add-button">
+
+        + Add Stop
+
+      </button>
+
+      <p class="stop-count">
+
+        0 of 20 stops added
+
+      </p>
+
+      <button class="optimize-button">
+
+        Optimize Route
+
+      </button>
+
+    </section>
+
+  </main>
 
 </body>
 
-</html
+</html>
