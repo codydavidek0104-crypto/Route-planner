@@ -270,6 +270,15 @@
       padding: 13px 18px;
     }
 
+    #map {
+      width: 100%;
+      height: 400px;
+      margin-top: 24px;
+      border-radius: 18px;
+      overflow: hidden;
+      background: #d9d9d9;
+    }
+
     .optimize-button {
       border: 1px solid var(--black);
       background: var(--white);
@@ -429,6 +438,7 @@
         class="route-message"
         aria-live="polite"
       ></p>
+      <div id="map"></div>
     </section>
 
     <p class="footer-note">
@@ -438,6 +448,21 @@
 
   <script>
     const MAX_STOPS = 20;
+    let map;
+    let directionsService;
+    let directionsRenderer;
+
+    function initMap() {
+      map = new google.maps.Map(document.getElementById("map"), {
+        center: { lat: 38.5816, lng: -121.4944 },
+        zoom: 10,
+      });
+
+      directionsService = new google.maps.DirectionsService();
+      directionsRenderer = new google.maps.DirectionsRenderer();
+      directionsRenderer.setMap(map);
+    }
+
 
     const stops = [];
 
@@ -563,7 +588,7 @@
   </script>
 <script
   async
-  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDlsd2EZo4MxLunslRRMm-Xuy_Y0g6yEYM&libraries=places">
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDlsd2EZo4MxLunslRRMm-Xuy_Y0g6yEYM&libraries=places&callback=initMap">
 </script>
 </body>
 </html>
