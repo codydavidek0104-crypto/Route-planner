@@ -265,6 +265,49 @@
       margin-top: 22px;
     }
 
+    .saved-routes {
+      margin-top: 22px;
+      padding: 18px;
+      border: 1px solid #e1e1e1;
+      border-radius: 12px;
+      background: #fafafa;
+    }
+
+    .saved-routes-title {
+      margin: 0 0 14px;
+      font-size: 16px;
+    }
+
+    .save-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .save-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .saved-routes select {
+      width: 100%;
+      min-width: 0;
+      padding: 14px 15px;
+      border: 1px solid #cfcfcf;
+      border-radius: 9px;
+      background: var(--white);
+      color: var(--black);
+      font-size: 16px;
+    }
+
+    .saved-route-button {
+      flex: 0 0 auto;
+      min-width: 110px;
+      padding: 0 16px;
+      border: 1px solid var(--black);
+      background: var(--white);
+      color: var(--black);
+    }
+
     .actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -452,6 +495,28 @@
         </button>
       </div>
 
+      <div class="saved-routes">
+        <h3 class="saved-routes-title">Saved Routes</h3>
+
+        <label for="route-name">Route name</label>
+        <div class="save-row">
+          <input id="route-name" type="text" placeholder="Example: Monday deliveries">
+          <button id="save-route" class="saved-route-button" type="button">
+            Save Route
+          </button>
+        </div>
+
+        <label for="saved-route-select">Load a saved route</label>
+        <div class="save-row">
+          <select id="saved-route-select">
+            <option value="">No saved routes</option>
+          </select>
+          <button id="load-route" class="saved-route-button" type="button">
+            Load Route
+          </button>
+        </div>
+      </div>
+
       <p
         id="route-message"
         class="route-message"
@@ -495,6 +560,11 @@
     const routeMessage = document.getElementById("route-message");
     const vehicleMpgInput = document.getElementById("vehicle-mpg");
     const fuelPriceInput = document.getElementById("fuel-price");
+    const routeNameInput = document.getElementById("route-name");
+    const saveRouteButton = document.getElementById("save-route");
+    const savedRouteSelect = document.getElementById("saved-route-select");
+    const loadRouteButton = document.getElementById("load-route");
+    const SAVED_ROUTES_KEY = "d7SavedRoutes";
 
     function updateStopCounter() {
       stopCounter.textContent =
@@ -581,6 +651,102 @@
         addStop();
       }
     });
+
+    function getSavedRoutes() {
+      try {
+        return JSON.parse(localStorage.getItem(SAVED_ROUTES_KEY)) || {};
+      } catch {
+        return {};
+      }
+    }
+
+    function updateSavedRouteOptions(selectedName = "") {
+      const savedRoutes = getSavedRoutes();
+      const names = Object.keys(savedRoutes).sort((a, b) =>
+        a.localeCompare(b)
+      );
+
+      savedRouteSelect.innerHTML = "";
+
+      if (names.length === 0) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No saved routes";
+        savedRouteSelect.appendChild(option);
+        return;
+      }
+
+      names.forEach((name) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        option.selected = name === selectedName;
+        savedRouteSelect.appendChild(option);
+      });
+    }
+
+    saveRouteButton.addEventListener("click", () => {
+      const name = routeNameInput.value.trim();
+      const destination = destinationInput.value.trim();
+
+      if (!name) {
+        routeMessage.textContent = "Enter a name for this route.";
+        routeNameInput.focus();
+        return;
+      }
+
+      if (stops.length < 1 || !destination) {
+        routeMessage.textContent =
+          "Add a starting stop and final destination before saving.";
+        return;
+      }
+
+      const savedRoutes = getSavedRoutes();
+      savedRoutes[name] = {
+        stops: [...stops],
+        destination,
+        vehicleMpg: vehicleMpgInput.value,
+        fuelPrice: fuelPriceInput.value
+      };
+
+      try {
+        localStorage.setItem(SAVED_ROUTES_KEY, JSON.stringify(savedRoutes));
+      } catch {
+        routeMessage.textContent = "Could not save the route on this device.";
+        return;
+      }
+
+      updateSavedRouteOptions(name);
+      routeMessage.textContent = "Route saved: " + name + ".";
+    });
+
+    loadRouteButton.addEventListener("click", () => {
+      const name = savedRouteSelect.value;
+      const savedRoute = getSavedRoutes()[name];
+
+      if (!savedRoute) {
+        routeMessage.textContent = "Choose a saved route first.";
+        return;
+      }
+
+      stops.splice(0, stops.length, ...savedRoute.stops.slice(0, MAX_STOPS));
+      destinationInput.value = savedRoute.destination;
+      vehicleMpgInput.value = savedRoute.vehicleMpg || "15";
+      fuelPriceInput.value = savedRoute.fuelPrice || "4.50";
+      routeNameInput.value = name;
+      renderStops();
+
+      if (directionsRenderer && map) {
+        directionsRenderer.setMap(null);
+        directionsRenderer = new google.maps.DirectionsRenderer();
+        directionsRenderer.setMap(map);
+      }
+
+      routeMessage.textContent =
+        "Route loaded: " + name + ". Tap Calculate or Route.";
+    });
+
+    updateSavedRouteOptions();
 
     optimizeButton.addEventListener("click", () => calculateRoute(true));
     calculateButton.addEventListener("click", () => calculateRoute(false));
