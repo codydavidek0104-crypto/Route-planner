@@ -580,9 +580,61 @@
     });
 
     calculateButton.addEventListener("click", () => {
-      routeMessage.textContent =
-        "Route calculation coming soon.";
-    });
+  const destination = destinationInput.value.trim();
+
+  if (stops.length < 1) {
+    routeMessage.textContent =
+      "Add at least one stop before calculating a route.";
+    return;
+  }
+
+  if (!destination) {
+    routeMessage.textContent =
+      "Enter your final destination.";
+    destinationInput.focus();
+    return;
+  }
+
+  const origin = stops[0];
+
+  const waypoints = stops.slice(1).map((address) => ({
+    location: address,
+    stopover: true
+  }));
+
+  routeMessage.textContent = "Calculating route...";
+
+  directionsService.route(
+    {
+      origin: origin,
+      destination: destination,
+      waypoints: waypoints,
+      travelMode: google.maps.TravelMode.DRIVING
+    },
+    (result, status) => {
+      if (status === "OK") {
+        directionsRenderer.setDirections(result);
+
+        let totalDistance = 0;
+        let totalDuration = 0;
+
+        result.routes[0].legs.forEach((leg) => {
+          totalDistance += leg.distance.value;
+          totalDuration += leg.duration.value;
+        });
+
+        const miles = (totalDistance / 1609.344).toFixed(1);
+        const minutes = Math.round(totalDuration / 60);
+
+        routeMessage.textContent =
+          `Route calculated: ${miles} miles • ${minutes} minutes`;
+      } else {
+        routeMessage.textContent =
+          `Could not calculate route: ${status}`;
+      }
+    }
+  );
+});
 
     updateStopCounter();
   </script>
