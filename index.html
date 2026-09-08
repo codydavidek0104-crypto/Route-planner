@@ -258,6 +258,13 @@
       letter-spacing: 0.5px;
     }
 
+    .fuel-settings {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 22px;
+    }
+
     .actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -415,6 +422,18 @@
         >
       </div>
 
+      <div class="fuel-settings">
+        <div>
+          <label for="vehicle-mpg">Vehicle MPG</label>
+          <input id="vehicle-mpg" type="number" min="1" step="0.1" value="15">
+        </div>
+
+        <div>
+          <label for="fuel-price">Fuel price per gallon</label>
+          <input id="fuel-price" type="number" min="0.01" step="0.01" value="4.50">
+        </div>
+      </div>
+
       <div class="actions">
         <button
           id="optimize-route"
@@ -474,6 +493,8 @@
     const optimizeButton = document.getElementById("optimize-route");
     const calculateButton = document.getElementById("calculate-route");
     const routeMessage = document.getElementById("route-message");
+    const vehicleMpgInput = document.getElementById("vehicle-mpg");
+    const fuelPriceInput = document.getElementById("fuel-price");
 
     function updateStopCounter() {
       stopCounter.textContent =
@@ -633,9 +654,15 @@
 
         const miles = (totalDistance / 1609.344).toFixed(1);
         const minutes = Math.round(totalDuration / 60);
+        const vehicleMpg = Number(vehicleMpgInput.value);
+        const fuelPrice = Number(fuelPriceInput.value);
+        const fuelCost =
+          vehicleMpg > 0 && fuelPrice > 0
+            ? ` • Est. fuel: $${((Number(miles) / vehicleMpg) * fuelPrice).toFixed(2)}`
+            : "";
 
         routeMessage.textContent =
-          `${optimize ? "Route optimized" : "Route calculated"}: ${miles} miles • ${minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`}`;
+          `${optimize ? "Route optimized" : "Route calculated"}: ${miles} miles • ${minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`}${fuelCost}`;
       } else {
         routeMessage.textContent =
           `Could not calculate route: ${status}`;
