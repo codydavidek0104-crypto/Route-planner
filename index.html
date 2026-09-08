@@ -561,25 +561,10 @@
       }
     });
 
-    optimizeButton.addEventListener("click", () => {
-      if (stops.length < 2) {
-        routeMessage.textContent =
-          "Add at least two stops before optimizing.";
-        return;
-      }
+    optimizeButton.addEventListener("click", () => calculateRoute(true));
+    calculateButton.addEventListener("click", () => calculateRoute(false));
 
-      if (!destinationInput.value.trim()) {
-        routeMessage.textContent =
-          "Enter your final destination before optimizing.";
-        destinationInput.focus();
-        return;
-      }
-
-      routeMessage.textContent =
-        "Route optimization will be connected next.";
-    });
-
-    calculateButton.addEventListener("click", () => {
+    function calculateRoute(optimize = false) {
   const destination = destinationInput.value.trim();
 
   if (stops.length < 1) {
@@ -595,24 +580,47 @@
     return;
   }
 
-  const origin = stops[0];
+  if (!directionsService) {
+    routeMessage.textContent = "Wait for the map to load, then try again.";
+    return;
+  }
+
+  const requestedStops = [...stops];
+  const origin = requestedStops[0];
 
   const waypoints = stops.slice(1).map((address) => ({
     location: address,
     stopover: true
   }));
 
-  routeMessage.textContent = "Calculating route...";
+  routeMessage.textContent = optimize
+    ? "Optimizing route..."
+    : "Calculating route...";
 
   directionsService.route(
     {
       origin: origin,
       destination: destination,
       waypoints: waypoints,
+      optimizeWaypoints: optimize,
       travelMode: google.maps.TravelMode.DRIVING
     },
     (result, status) => {
-      if (status === "OK") {
+      if (JSON.stringify(stops) !== JSON.stringify(requestedStops) ||
+        destinationInput.value.trim() !== destination) {
+      routeMessage.textContent = "Addresses changed. Calculate again.";
+      return;
+    }
+
+    if (status === "OK") {
+      if (optimize) {
+        const middleStops = requestedStops.slice(1);
+        const reordered = result.routes[0].waypoint_order.map(
+          index => middleStops[index]
+        );
+        stops.splice(0, stops.length, origin, ...reordered);
+        renderStops();
+      }
         directionsRenderer.setDirections(result);
 
         let totalDistance = 0;
@@ -627,14 +635,14 @@
         const minutes = Math.round(totalDuration / 60);
 
         routeMessage.textContent =
-          `Route calculated: ${miles} miles • ${minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`}`;
+          `${optimize ? "Route optimized" : "Route calculated"}: ${miles} miles • ${minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`}`;
       } else {
         routeMessage.textContent =
           `Could not calculate route: ${status}`;
       }
     }
   );
-});
+}
 
     updateStopCounter();
   </script>
