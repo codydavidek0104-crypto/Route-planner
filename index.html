@@ -522,6 +522,9 @@
         class="route-message"
         aria-live="polite"
       ></p>
+      <p id="route-stale-warning" class="route-message" role="status" hidden>
+        Addresses changed. Results are out of date. Calculate or Optimize Route again.
+      </p>
       <div id="map"></div>
     </section>
 
@@ -565,6 +568,27 @@
     const savedRouteSelect = document.getElementById("saved-route-select");
     const loadRouteButton = document.getElementById("load-route");
     const SAVED_ROUTES_KEY = "d7SavedRoutes";
+    const routeStaleWarning = document.getElementById("route-stale-warning");
+    let routeRequestId = 0;
+    let routeRequestPending = false;
+    let routeShown = false;
+
+    function clearRouteResults() {
+      if (directionsRenderer) directionsRenderer.setMap(null);
+      routeShown = false;
+      routeMessage.textContent = "";
+    }
+
+    function invalidateRoute() {
+      const hadResults = routeShown || routeRequestPending;
+      // Even an edit that is later undone must invalidate an in-flight response.
+      routeRequestId += 1;
+      routeRequestPending = false;
+      clearRouteResults();
+      if (hadResults) routeStaleWarning.hidden = false;
+    }
+
+    destinationInput.addEventListener("input", invalidateRoute);
 
     function updateStopCounter() {
       stopCounter.textContent =
@@ -604,6 +628,7 @@
 
         removeButton.addEventListener("click", () => {
           stops.splice(index, 1);
+          invalidateRoute();
           renderStops();
           routeMessage.textContent = "";
         });
@@ -635,6 +660,7 @@
       }
 
       stops.push(address);
+      invalidateRoute();
 
       stopInput.value = "";
       routeMessage.textContent = "";
@@ -729,18 +755,13 @@
         return;
       }
 
+      invalidateRoute();
       stops.splice(0, stops.length, ...savedRoute.stops.slice(0, MAX_STOPS));
       destinationInput.value = savedRoute.destination;
       vehicleMpgInput.value = savedRoute.vehicleMpg || "15";
       fuelPriceInput.value = savedRoute.fuelPrice || "4.50";
       routeNameInput.value = name;
       renderStops();
-
-      if (directionsRenderer && map) {
-        directionsRenderer.setMap(null);
-        directionsRenderer = new google.maps.DirectionsRenderer();
-        directionsRenderer.setMap(map);
-      }
 
       routeMessage.textContent =
         "Route loaded: " + name + ". Tap Calculate or Optimize Route.";
@@ -752,6 +773,10 @@
     calculateButton.addEventListener("click", () => calculateRoute(false));
 
     function calculateRoute(optimize = false) {
+  // Only the latest request may publish results, including repeated clicks.
+  const requestId = ++routeRequestId;
+  routeRequestPending = false;
+  clearRouteResults();
   const destination = destinationInput.value.trim();
 
   if (stops.length < 1) {
@@ -775,7 +800,7 @@
   const requestedStops = [...stops];
   const origin = requestedStops[0];
 
-  const waypoints = stops.slice(1).map((address) => ({
+  const waypoints = requestedStops.slice(1).map((address) => ({
     location: address,
     stopover: true
   }));
@@ -784,6 +809,7 @@
     ? "Optimizing route..."
     : "Calculating route...";
 
+  routeRequestPending = true;
   directionsService.route(
     {
       origin: origin,
@@ -793,9 +819,12 @@
       travelMode: google.maps.TravelMode.DRIVING
     },
     (result, status) => {
+      if (requestId !== routeRequestId) return;
+      routeRequestPending = false;
       if (JSON.stringify(stops) !== JSON.stringify(requestedStops) ||
         destinationInput.value.trim() !== destination) {
-      routeMessage.textContent = "Addresses changed. Calculate again.";
+      invalidateRoute();
+      routeStaleWarning.hidden = false;
       return;
     }
 
@@ -809,6 +838,9 @@
         renderStops();
       }
         directionsRenderer.setDirections(result);
+        directionsRenderer.setMap(map);
+        routeShown = true;
+        routeStaleWarning.hidden = true;
 
         let totalDistance = 0;
         let totalDuration = 0;
