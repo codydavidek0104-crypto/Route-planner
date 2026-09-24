@@ -308,6 +308,15 @@
       color: var(--black);
     }
 
+    .delete-route-button {
+      border-color: var(--red);
+      color: var(--red);
+    }
+
+    .delete-route-button:hover {
+      background: #fff0f1;
+    }
+
     .actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -514,6 +523,9 @@
           <button id="load-route" class="saved-route-button" type="button">
             Load Route
           </button>
+          <button id="delete-route" class="saved-route-button delete-route-button" type="button">
+            Delete Route
+          </button>
         </div>
       </div>
 
@@ -567,6 +579,7 @@
     const saveRouteButton = document.getElementById("save-route");
     const savedRouteSelect = document.getElementById("saved-route-select");
     const loadRouteButton = document.getElementById("load-route");
+    const deleteRouteButton = document.getElementById("delete-route");
     const SAVED_ROUTES_KEY = "d7SavedRoutes";
     const routeStaleWarning = document.getElementById("route-stale-warning");
     let routeRequestId = 0;
@@ -728,6 +741,12 @@
       }
 
       const savedRoutes = getSavedRoutes();
+      if (Object.prototype.hasOwnProperty.call(savedRoutes, name) &&
+        !window.confirm(`Replace the saved route “${name}”?`)) {
+        routeMessage.textContent = "Route was not overwritten.";
+        return;
+      }
+
       savedRoutes[name] = {
         stops: [...stops],
         destination,
@@ -765,6 +784,34 @@
 
       routeMessage.textContent =
         "Route loaded: " + name + ". Tap Calculate or Optimize Route.";
+    });
+
+    deleteRouteButton.addEventListener("click", () => {
+      const name = savedRouteSelect.value;
+      const savedRoutes = getSavedRoutes();
+
+      if (!name || !Object.prototype.hasOwnProperty.call(savedRoutes, name)) {
+        routeMessage.textContent = "Choose a saved route first.";
+        return;
+      }
+
+      if (!window.confirm(`Delete the saved route “${name}”?`)) {
+        routeMessage.textContent = "Route was not deleted.";
+        return;
+      }
+
+      delete savedRoutes[name];
+
+      try {
+        localStorage.setItem(SAVED_ROUTES_KEY, JSON.stringify(savedRoutes));
+      } catch {
+        routeMessage.textContent = "Could not delete the route on this device.";
+        return;
+      }
+
+      if (routeNameInput.value.trim() === name) routeNameInput.value = "";
+      updateSavedRouteOptions();
+      routeMessage.textContent = "Route deleted: " + name + ".";
     });
 
     updateSavedRouteOptions();
