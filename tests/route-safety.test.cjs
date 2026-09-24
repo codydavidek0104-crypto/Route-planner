@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 // Run the actual page script with controlled Maps responses and a minimal DOM.
-function setup() {
+function setup(confirmations = []) {
   const elements = new Map();
   function element() {
     return {
@@ -25,11 +25,18 @@ function setup() {
   const requests = [];
   const renderers = [];
   const stored = {};
+  const confirmationMessages = [];
   const context = vm.createContext({
     document: { getElementById: el, createElement: element },
     localStorage: {
       getItem: key => stored[key] || null,
       setItem: (key, value) => { stored[key] = value; },
+    },
+    window: {
+      confirm: message => {
+        confirmationMessages.push(message);
+        return confirmations.length ? confirmations.shift() : true;
+      },
     },
     google: { maps: {
       Map: class {},
@@ -59,7 +66,11 @@ function setup() {
     assert.doesNotMatch(el('route-message').textContent, /miles|Est\. fuel/);
   };
   add('Start'); destination('End');
-  return { el, click, add, destination, requests, renderers, reply, calculate, stale };
+  const savedRoutes = () => JSON.parse(stored.d7SavedRoutes || '{}');
+  return {
+    el, click, add, destination, requests, renderers, reply, calculate, stale,
+    savedRoutes, confirmationMessages,
+  };
 }
 
 test('calculation preserves distance, duration and fuel; destination edits clear results', () => {
@@ -119,4 +130,36 @@ test('optimization still reorders stops and publishes a current route', () => {
 test('initial address entry does not claim results are stale', () => {
   const a = setup(); a.add('Middle'); a.destination('Different');
   assert.equal(a.el('route-stale-warning').hidden, true);
+});
+
+test('existing route names require confirmation before overwrite', () => {
+  const a = setup([false, true]);
+  a.el('route-name').value = 'Synthetic Route';
+  a.click('save-route');
+  a.destination('Changed destination');
+
+  a.click('save-route');
+  assert.equal(a.savedRoutes()['Synthetic Route'].destination, 'End');
+  assert.equal(a.el('route-message').textContent, 'Route was not overwritten.');
+
+  a.click('save-route');
+  assert.equal(a.savedRoutes()['Synthetic Route'].destination, 'Changed destination');
+  assert.match(a.confirmationMessages[0], /Replace.*Synthetic Route/);
+});
+
+test('delete confirmation removes only the selected saved route', () => {
+  const a = setup([false, true]);
+  for (const name of ['Synthetic One', 'Synthetic Two']) {
+    a.el('route-name').value = name;
+    a.click('save-route');
+  }
+
+  a.el('saved-route-select').value = 'Synthetic One';
+  a.click('delete-route');
+  assert.deepEqual(Object.keys(a.savedRoutes()).sort(), ['Synthetic One', 'Synthetic Two']);
+  assert.equal(a.el('route-message').textContent, 'Route was not deleted.');
+
+  a.click('delete-route');
+  assert.deepEqual(Object.keys(a.savedRoutes()), ['Synthetic Two']);
+  assert.match(a.confirmationMessages.at(-1), /Delete.*Synthetic One/);
 });
