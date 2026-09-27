@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 // Run the actual page script with controlled Maps responses and a minimal DOM.
-function setup(confirmations = []) {
+function setup(confirmations = [], { init = true } = {}) {
   const elements = new Map();
   function element() {
     return {
@@ -26,8 +26,26 @@ function setup(confirmations = []) {
   const renderers = [];
   const stored = {};
   const confirmationMessages = [];
+  // Fake timers: advance(ms) runs due callbacks in order.
+  let now = 0;
+  let nextTimerId = 1;
+  const timers = new Map();
+  const advance = ms => {
+    const target = now + ms;
+    for (;;) {
+      const due = [...timers.entries()].filter(([, t]) => t.at <= target)
+        .sort((x, y) => x[1].at - y[1].at)[0];
+      if (!due) break;
+      timers.delete(due[0]);
+      now = due[1].at;
+      due[1].fn();
+    }
+    now = target;
+  };
   const context = vm.createContext({
     document: { getElementById: el, createElement: element },
+    setTimeout: (fn, ms) => { const id = nextTimerId++; timers.set(id, { fn, at: now + ms }); return id; },
+    clearTimeout: id => { timers.delete(id); },
     localStorage: {
       getItem: key => stored[key] || null,
       setItem: (key, value) => { stored[key] = value; },
@@ -51,7 +69,7 @@ function setup(confirmations = []) {
   });
   const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], context);
-  vm.runInContext('initMap()', context);
+  if (init) vm.runInContext('initMap()', context);
   const click = id => el(id).listeners.click();
   const add = address => { el('stop-input').value = address; click('add-stop'); };
   const destination = address => { el('destination').value = address; el('destination').listeners.input(); };
@@ -65,11 +83,11 @@ function setup(confirmations = []) {
     assert.equal(renderers[0].map, null);
     assert.doesNotMatch(el('route-message').textContent, /miles|Est\. fuel/);
   };
-  add('Start'); destination('End');
+  if (init) { add('Start'); destination('End'); }
   const savedRoutes = () => JSON.parse(stored.d7SavedRoutes || '{}');
   return {
     el, click, add, destination, requests, renderers, reply, calculate, stale,
-    savedRoutes, confirmationMessages,
+    savedRoutes, confirmationMessages, advance, context,
   };
 }
 
@@ -162,4 +180,74 @@ test('delete confirmation removes only the selected saved route', () => {
   a.click('delete-route');
   assert.deepEqual(Object.keys(a.savedRoutes()), ['Synthetic Two']);
   assert.match(a.confirmationMessages.at(-1), /Delete.*Synthetic One/);
+});
+
+const MAPS_ERROR = "The map couldn't load. The Google Maps API key may not be authorized for this site.";
+
+test('Maps auth failure makes Calculate and Optimize report the error instead of hanging', () => {
+  const a = setup();
+  a.context.window.gm_authFailure();
+  assert.equal(a.el('route-message').textContent, MAPS_ERROR);
+  a.calculate();
+  assert.equal(a.el('route-message').textContent, MAPS_ERROR);
+  a.click('optimize-route');
+  assert.equal(a.el('route-message').textContent, MAPS_ERROR);
+  assert.equal(a.requests.length, 0);
+});
+
+test('Maps auth failure during a pending request abandons it', () => {
+  const a = setup(); a.calculate();
+  a.context.window.gm_authFailure();
+  assert.equal(a.el('route-message').textContent, MAPS_ERROR);
+  a.reply(0);
+  assert.equal(a.el('route-message').textContent, MAPS_ERROR);
+  assert.equal(a.renderers[0].map, null);
+});
+
+test('Maps script error or load timeout marks maps unavailable', () => {
+  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /<script[^>]*onerror="handleMapsLoadFailure\(\)"[^>]*maps\.googleapis\.com/);
+
+  const errored = setup([], { init: false });
+  vm.runInContext('handleMapsLoadFailure()', errored.context);
+  errored.add('Start'); errored.destination('End'); errored.calculate();
+  assert.equal(errored.el('route-message').textContent, MAPS_ERROR);
+
+  const slow = setup([], { init: false });
+  slow.advance(14999);
+  assert.equal(slow.el('route-message').textContent, '');
+  slow.advance(1);
+  assert.equal(slow.el('route-message').textContent, MAPS_ERROR);
+  slow.add('Start'); slow.destination('End'); slow.calculate();
+  assert.equal(slow.el('route-message').textContent, MAPS_ERROR);
+  assert.equal(slow.requests.length, 0);
+
+  // A late initMap after a timeout (not an auth failure) restores routing.
+  vm.runInContext('initMap()', slow.context);
+  slow.calculate(); slow.reply(0);
+  assert.match(slow.el('route-message').textContent, /Route calculated/);
+});
+
+test('route requests time out after 20 seconds and ignore late responses', () => {
+  const a = setup(); a.calculate();
+  a.advance(19999);
+  assert.equal(a.el('route-message').textContent, 'Calculating route...');
+  a.advance(1);
+  assert.equal(a.el('route-message').textContent, 'Route request timed out. Please try again.');
+  a.reply(0);
+  assert.equal(a.el('route-message').textContent, 'Route request timed out. Please try again.');
+  assert.equal(a.renderers[0].map, null);
+  // Busy state was reset, so an edit does not claim results are stale.
+  a.destination('End');
+  assert.equal(a.el('route-stale-warning').hidden, true);
+  a.calculate(); a.reply(1);
+  assert.match(a.el('route-message').textContent, /Route calculated/);
+});
+
+test('a timely route response cancels the timeout', () => {
+  const a = setup(); a.calculate(); a.reply(0);
+  const message = a.el('route-message').textContent;
+  a.advance(20000);
+  assert.equal(a.el('route-message').textContent, message);
+  assert.ok(a.renderers[0].map);
 });

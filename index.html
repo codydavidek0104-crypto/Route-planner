@@ -550,8 +550,44 @@
     let map;
     let directionsService;
     let directionsRenderer;
+    const MAPS_LOAD_TIMEOUT_MS = 15000;
+    const ROUTE_REQUEST_TIMEOUT_MS = 20000;
+    const MAPS_UNAVAILABLE_MESSAGE =
+      "The map couldn't load. The Google Maps API key may not be authorized for this site.";
+    let mapsUnavailable = false;
+    let mapsAuthFailed = false;
+
+    function handleMapsLoadFailure() {
+      clearTimeout(mapsLoadTimer);
+      mapsUnavailable = true;
+      if (routeRequestPending) {
+        // Abandon any in-flight request; its callback may never arrive.
+        routeRequestId += 1;
+        routeRequestPending = false;
+      }
+      routeMessage.textContent = MAPS_UNAVAILABLE_MESSAGE;
+    }
+
+    // Google calls this on key/referrer errors such as RefererNotAllowedMapError.
+    window.gm_authFailure = () => {
+      mapsAuthFailed = true;
+      handleMapsLoadFailure();
+    };
+
+    const mapsLoadTimer = setTimeout(() => {
+      if (!directionsService) handleMapsLoadFailure();
+    }, MAPS_LOAD_TIMEOUT_MS);
 
     function initMap() {
+      clearTimeout(mapsLoadTimer);
+      if (mapsUnavailable && !mapsAuthFailed) {
+        // A slow load arrived after the timeout.
+        mapsUnavailable = false;
+        if (routeMessage.textContent === MAPS_UNAVAILABLE_MESSAGE) {
+          routeMessage.textContent = "";
+        }
+      }
+
       map = new google.maps.Map(document.getElementById("map"), {
         center: { lat: 38.5816, lng: -121.4944 },
         zoom: 10,
@@ -839,6 +875,11 @@
     return;
   }
 
+  if (mapsUnavailable) {
+    routeMessage.textContent = MAPS_UNAVAILABLE_MESSAGE;
+    return;
+  }
+
   if (!directionsService) {
     routeMessage.textContent = "Wait for the map to load, then try again.";
     return;
@@ -857,6 +898,13 @@
     : "Calculating route...";
 
   routeRequestPending = true;
+  const routeTimeout = setTimeout(() => {
+    if (requestId !== routeRequestId) return;
+    // Bump the ID so a late response is ignored.
+    routeRequestId += 1;
+    routeRequestPending = false;
+    routeMessage.textContent = "Route request timed out. Please try again.";
+  }, ROUTE_REQUEST_TIMEOUT_MS);
   directionsService.route(
     {
       origin: origin,
@@ -866,6 +914,7 @@
       travelMode: google.maps.TravelMode.DRIVING
     },
     (result, status) => {
+      clearTimeout(routeTimeout);
       if (requestId !== routeRequestId) return;
       routeRequestPending = false;
       if (JSON.stringify(stops) !== JSON.stringify(requestedStops) ||
@@ -920,6 +969,7 @@
   </script>
 <script
   async
+  onerror="handleMapsLoadFailure()"
   src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDlsd2EZo4MxLunslRRMm-Xuy_Y0g6yEYM&libraries=places&callback=initMap">
 </script>
 </body>
