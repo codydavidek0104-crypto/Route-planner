@@ -218,6 +218,20 @@
       font-size: 14px;
     }
 
+    .stop-item input.stop-address {
+      /* Let flex size the field; an input's intrinsic width overflows phones. */
+      width: 0;
+      padding: 8px 10px;
+      border-color: transparent;
+      background: transparent;
+    }
+
+    .stop-item input.stop-address:hover,
+    .stop-item input.stop-address:focus {
+      border-color: #cfcfcf;
+      background: var(--white);
+    }
+
     .remove-button {
       flex: 0 0 auto;
       padding: 7px 10px;
@@ -236,8 +250,13 @@
       background: var(--light-gray);
     }
 
-    .destination-wrapper {
+    .destination-wrapper,
+    .start-wrapper {
       position: relative;
+    }
+
+    .start-wrapper {
+      margin-bottom: 22px;
     }
 
     .destination-label-row {
@@ -464,8 +483,25 @@
       <h2 class="section-title">Build Your Route</h2>
 
       <p class="section-description">
-        Add up to 20 stops, then enter your final destination.
+        Enter a start, add up to 20 stops between the start and destination, then enter your final destination.
       </p>
+
+      <div class="start-wrapper">
+        <div class="destination-label-row">
+          <label for="start">Start</label>
+          <span class="destination-badge">Origin</span>
+        </div>
+
+        <input
+          id="start"
+          type="text"
+          placeholder="Enter starting address"
+          autocomplete="off"
+        >
+        <p class="stop-counter">
+          Starting point. Optimize will not reorder this address.
+        </p>
+      </div>
 
       <label for="stop-input">Add a stop</label>
 
@@ -474,7 +510,7 @@
           id="stop-input"
           type="text"
           placeholder="Enter an address"
-          autocomplete="street-address"
+          autocomplete="off"
         >
 
         <button
@@ -491,7 +527,7 @@
         class="stop-counter"
         aria-live="polite"
       >
-        0 of 20 stops added
+        0 of 20 stops between start and destination
       </p>
 
       <div
@@ -512,7 +548,7 @@
           id="destination"
           type="text"
           placeholder="Enter final destination"
-          autocomplete="street-address"
+          autocomplete="off"
         >
       </div>
 
@@ -658,6 +694,7 @@
       directionsService = new google.maps.DirectionsService();
       directionsRenderer = new google.maps.DirectionsRenderer();
       directionsRenderer.setMap(map);
+      attachAllAutocompletes();
     }
 
 
@@ -667,6 +704,7 @@
     const addStopButton = document.getElementById("add-stop");
     const stopsContainer = document.getElementById("stops-container");
     const stopCounter = document.getElementById("stop-counter");
+    const startInput = document.getElementById("start");
     const destinationInput = document.getElementById("destination");
     const optimizeButton = document.getElementById("optimize-route");
     const calculateButton = document.getElementById("calculate-route");
@@ -804,10 +842,95 @@
     }
 
     destinationInput.addEventListener("input", invalidateRoute);
+    startInput.addEventListener("input", invalidateRoute);
+
+    // Bias suggestions toward Northern California (the map is centered on
+    // Sacramento) without hard-restricting them. Legacy Autocomplete is used
+    // instead of PlaceAutocompleteElement because it attaches to these inputs:
+    // a typed address still works, saved values still load, and a missing
+    // Places library leaves the fields as plain text. The widget API replaces
+    // the input, and this page already loads the classic places library.
+    const NORTHERN_CALIFORNIA_BOUNDS = {
+      south: 36.9,
+      west: -124.5,
+      north: 42.0,
+      east: -119.0
+    };
+
+    function placesAutocompleteOptions() {
+      const options = {
+        fields: ["formatted_address"],
+        strictBounds: false
+      };
+
+      try {
+        if (typeof google.maps.LatLngBounds === "function") {
+          options.bounds = new google.maps.LatLngBounds(
+            { lat: NORTHERN_CALIFORNIA_BOUNDS.south, lng: NORTHERN_CALIFORNIA_BOUNDS.west },
+            { lat: NORTHERN_CALIFORNIA_BOUNDS.north, lng: NORTHERN_CALIFORNIA_BOUNDS.east }
+          );
+        } else {
+          options.bounds = NORTHERN_CALIFORNIA_BOUNDS;
+        }
+      } catch {
+        options.bounds = NORTHERN_CALIFORNIA_BOUNDS;
+      }
+
+      return options;
+    }
+
+    function attachAutocomplete(input, onFormattedAddress) {
+      if (!input || input._d7PlacesAttached) return;
+
+      let AutocompleteCtor;
+      try {
+        AutocompleteCtor = google.maps.places.Autocomplete;
+      } catch {
+        return;
+      }
+      if (typeof AutocompleteCtor !== "function") return;
+
+      try {
+        const autocomplete = new AutocompleteCtor(input, placesAutocompleteOptions());
+        input._d7PlacesAttached = true;
+        autocomplete.addListener("place_changed", () => {
+          let place = {};
+          try {
+            place = autocomplete.getPlace() || {};
+          } catch {
+            return;
+          }
+          if (!place.formatted_address) return;
+          input.value = place.formatted_address;
+          input.textContent = place.formatted_address;
+          if (onFormattedAddress) onFormattedAddress(place.formatted_address);
+        });
+      } catch {
+        // Places failed to initialize; keep the plain text input.
+      }
+    }
+
+    function onStopFormatted(input) {
+      const index = input._stopIndex;
+      if (typeof index !== "number" || index < 0 || index >= stops.length) return;
+      const current = stopsContainer.children[index] &&
+        stopsContainer.children[index].children[1];
+      // renderStops replaces inputs; ignore a suggestion from a detached field.
+      if (current && current !== input) return;
+      stops[index] = input.value;
+      invalidateRoute();
+    }
+
+    function attachAllAutocompletes() {
+      attachAutocomplete(startInput, () => invalidateRoute());
+      attachAutocomplete(stopInput);
+      attachAutocomplete(destinationInput, () => invalidateRoute());
+      // Stop rows attach on focus (see renderStops).
+    }
 
     function updateStopCounter() {
       stopCounter.textContent =
-        `${stops.length} of ${MAX_STOPS} stops added`;
+        `${stops.length} of ${MAX_STOPS} stops between start and destination`;
 
       const limitReached = stops.length >= MAX_STOPS;
 
@@ -832,9 +955,27 @@
         stopNumber.className = "stop-number";
         stopNumber.textContent = index + 1;
 
-        const stopAddress = document.createElement("span");
+        const stopAddress = document.createElement("input");
         stopAddress.className = "stop-address";
+        stopAddress.type = "text";
+        stopAddress.value = address;
         stopAddress.textContent = address;
+        stopAddress.placeholder = "Enter an address";
+        stopAddress.autocomplete = "off";
+        stopAddress.ariaLabel = "Stop " + (index + 1);
+        stopAddress._stopIndex = index;
+
+        stopAddress.addEventListener("input", () => {
+          stops[index] = stopAddress.value;
+          stopAddress.textContent = stopAddress.value;
+          invalidateRoute();
+        });
+        // Attach Places when the row is first focused. renderStops rebuilds
+        // every row, and each Autocomplete adds a .pac-container to <body>
+        // that is never removed, so attaching eagerly leaks one per row per render.
+        stopAddress.addEventListener("focus", () => {
+          attachAutocomplete(stopAddress, () => onStopFormatted(stopAddress));
+        });
 
         const removeButton = document.createElement("button");
         removeButton.className = "remove-button";
@@ -888,9 +1029,22 @@
     addStopButton.addEventListener("click", addStop);
 
     stopInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        addStop();
+      if (event.key !== "Enter") return;
+      // Places uses Enter to pick a suggestion. Don't also add the stop
+      // while a suggestion dropdown is open. Every autocomplete field has its
+      // own .pac-container, so check all of them. A missing querySelectorAll
+      // (tests, or Places not loaded) still adds the typed address.
+      try {
+        if (typeof document.querySelectorAll === "function") {
+          const dropdownOpen = [...document.querySelectorAll(".pac-container")].some(
+            (pac) => pac.style.display !== "none" && pac.offsetParent !== null
+          );
+          if (dropdownOpen) return;
+        }
+      } catch {
+        // Ignore and add the typed stop.
       }
+      addStop();
     });
 
     function getSavedRoutes() {
@@ -929,6 +1083,7 @@
     saveRouteButton.addEventListener("click", () => {
       const name = routeNameInput.value.trim();
       const destination = destinationInput.value.trim();
+      const start = startInput.value.trim();
 
       if (!name) {
         routeMessage.textContent = "Enter a name for this route.";
@@ -936,9 +1091,11 @@
         return;
       }
 
-      if (stops.length < 1 || !destination) {
+      if (!start || !destination) {
         routeMessage.textContent =
-          "Add a starting stop and final destination before saving.";
+          "Enter a starting address and final destination before saving.";
+        if (!start) startInput.focus();
+        else destinationInput.focus();
         return;
       }
 
@@ -950,6 +1107,7 @@
       }
 
       savedRoutes[name] = {
+        start,
         stops: [...stops],
         destination,
         vehicleMpg: vehicleMpgInput.value,
@@ -977,8 +1135,24 @@
       }
 
       invalidateRoute();
-      stops.splice(0, stops.length, ...savedRoute.stops.slice(0, MAX_STOPS));
-      destinationInput.value = savedRoute.destination;
+      const savedStops = Array.isArray(savedRoute.stops) ? savedRoute.stops : [];
+      let start;
+      let loadedStops;
+      if (typeof savedRoute.start === "string" && savedRoute.start.trim()) {
+        start = savedRoute.start.trim();
+        loadedStops = savedStops;
+      } else {
+        // Older saves had no start field; the first stop was the origin.
+        start = String(savedStops[0] || "").trim();
+        loadedStops = savedStops.slice(1);
+      }
+      startInput.value = start;
+      stops.splice(
+        0,
+        stops.length,
+        ...loadedStops.slice(0, MAX_STOPS).map((stop) => String(stop))
+      );
+      destinationInput.value = savedRoute.destination || "";
       vehicleMpgInput.value = savedRoute.vehicleMpg || "15";
       fuelPriceInput.value = savedRoute.fuelPrice || "4.50";
       routeNameInput.value = name;
@@ -1022,115 +1196,120 @@
     calculateButton.addEventListener("click", () => calculateRoute(false));
 
     function calculateRoute(optimize = false) {
-  // Only the latest request may publish results, including repeated clicks.
-  const requestId = ++routeRequestId;
-  routeRequestPending = false;
-  clearRouteResults();
-  const destination = destinationInput.value.trim();
-
-  if (stops.length < 1) {
-    routeMessage.textContent =
-      "Add at least one stop before calculating a route.";
-    return;
-  }
-
-  if (!destination) {
-    routeMessage.textContent =
-      "Enter your final destination.";
-    destinationInput.focus();
-    return;
-  }
-
-  if (mapsUnavailable) {
-    routeMessage.textContent = MAPS_UNAVAILABLE_MESSAGE;
-    return;
-  }
-
-  if (!directionsService) {
-    routeMessage.textContent = "Wait for the map to load, then try again.";
-    return;
-  }
-
-  const requestedStops = [...stops];
-  const origin = requestedStops[0];
-
-  const waypoints = requestedStops.slice(1).map((address) => ({
-    location: address,
-    stopover: true
-  }));
-
-  routeMessage.textContent = optimize
-    ? "Optimizing route..."
-    : "Calculating route...";
-
-  routeRequestPending = true;
-  const routeTimeout = setTimeout(() => {
-    if (requestId !== routeRequestId) return;
-    // Bump the ID so a late response is ignored.
-    routeRequestId += 1;
-    routeRequestPending = false;
-    routeMessage.textContent = "Route request timed out. Please try again.";
-  }, ROUTE_REQUEST_TIMEOUT_MS);
-  directionsService.route(
-    {
-      origin: origin,
-      destination: destination,
-      waypoints: waypoints,
-      optimizeWaypoints: optimize,
-      travelMode: google.maps.TravelMode.DRIVING
-    },
-    (result, status) => {
-      clearTimeout(routeTimeout);
-      if (requestId !== routeRequestId) return;
+      // Only the latest request may publish results, including repeated clicks.
+      const requestId = ++routeRequestId;
       routeRequestPending = false;
-      if (JSON.stringify(stops) !== JSON.stringify(requestedStops) ||
-        destinationInput.value.trim() !== destination) {
-      invalidateRoute();
-      routeStaleWarning.hidden = false;
-      return;
-    }
+      clearRouteResults();
+      const destination = destinationInput.value.trim();
+      const origin = startInput.value.trim();
 
-    if (status === "OK") {
-      const middleStops = requestedStops.slice(1);
-      const order = optimize ? result.routes[0].waypoint_order :
-        middleStops.map((_, index) => index);
-      const orderedStops = order.map(index => middleStops[index]);
-      if (optimize) {
-        stops.splice(0, stops.length, origin, ...orderedStops);
-        renderStops();
+      if (!origin) {
+        routeMessage.textContent = "Enter a starting address.";
+        startInput.focus();
+        return;
       }
-        directionsRenderer.setDirections(result);
-        directionsRenderer.setMap(map);
-        routeShown = true;
-        routeStaleWarning.hidden = true;
-        showNavigation([origin, ...orderedStops, destination]);
 
-        let totalDistance = 0;
-        let totalDuration = 0;
-
-        result.routes[0].legs.forEach((leg) => {
-          totalDistance += leg.distance.value;
-          totalDuration += leg.duration.value;
-        });
-
-        const miles = (totalDistance / 1609.344).toFixed(1);
-        const minutes = Math.round(totalDuration / 60);
-        const vehicleMpg = Number(vehicleMpgInput.value);
-        const fuelPrice = Number(fuelPriceInput.value);
-        const fuelCost =
-          vehicleMpg > 0 && fuelPrice > 0
-            ? ` • Est. fuel: $${((Number(miles) / vehicleMpg) * fuelPrice).toFixed(2)}`
-            : "";
-
-        routeMessage.textContent =
-          `${optimize ? "Route optimized" : "Route calculated"}: ${miles} miles • ${minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`}${fuelCost}`;
-      } else {
-        routeMessage.textContent =
-          `Could not calculate route: ${status}`;
+      if (!destination) {
+        routeMessage.textContent = "Enter your final destination.";
+        destinationInput.focus();
+        return;
       }
+
+      if (stops.some((address) => !String(address).trim())) {
+        routeMessage.textContent = "Enter an address for every stop.";
+        return;
+      }
+
+      if (mapsUnavailable) {
+        routeMessage.textContent = MAPS_UNAVAILABLE_MESSAGE;
+        return;
+      }
+
+      if (!directionsService) {
+        routeMessage.textContent = "Wait for the map to load, then try again.";
+        return;
+      }
+
+      const requestedStops = stops.map((address) => String(address));
+      const waypoints = requestedStops.map((address) => ({
+        location: address.trim(),
+        stopover: true
+      }));
+
+      routeMessage.textContent = optimize
+        ? "Optimizing route..."
+        : "Calculating route...";
+
+      routeRequestPending = true;
+      const routeTimeout = setTimeout(() => {
+        if (requestId !== routeRequestId) return;
+        // Bump the ID so a late response is ignored.
+        routeRequestId += 1;
+        routeRequestPending = false;
+        routeMessage.textContent = "Route request timed out. Please try again.";
+      }, ROUTE_REQUEST_TIMEOUT_MS);
+      directionsService.route(
+        {
+          origin: origin,
+          destination: destination,
+          waypoints: waypoints,
+          optimizeWaypoints: optimize,
+          travelMode: google.maps.TravelMode.DRIVING
+        },
+        (result, status) => {
+          clearTimeout(routeTimeout);
+          if (requestId !== routeRequestId) return;
+          routeRequestPending = false;
+          if (JSON.stringify(stops) !== JSON.stringify(requestedStops) ||
+            destinationInput.value.trim() !== destination ||
+            startInput.value.trim() !== origin) {
+            invalidateRoute();
+            routeStaleWarning.hidden = false;
+            return;
+          }
+
+          if (status === "OK") {
+            let orderedStops = requestedStops;
+            if (optimize && requestedStops.length > 0) {
+              const order = result.routes[0].waypoint_order || [];
+              if (order.length === requestedStops.length) {
+                orderedStops = order.map((index) => requestedStops[index]);
+                stops.splice(0, stops.length, ...orderedStops);
+                renderStops();
+              }
+            }
+            directionsRenderer.setDirections(result);
+            directionsRenderer.setMap(map);
+            routeShown = true;
+            routeStaleWarning.hidden = true;
+            showNavigation([origin, ...orderedStops.map((address) => address.trim()), destination]);
+
+            let totalDistance = 0;
+            let totalDuration = 0;
+
+            result.routes[0].legs.forEach((leg) => {
+              totalDistance += leg.distance.value;
+              totalDuration += leg.duration.value;
+            });
+
+            const miles = (totalDistance / 1609.344).toFixed(1);
+            const minutes = Math.round(totalDuration / 60);
+            const vehicleMpg = Number(vehicleMpgInput.value);
+            const fuelPrice = Number(fuelPriceInput.value);
+            const fuelCost =
+              vehicleMpg > 0 && fuelPrice > 0
+                ? ` • Est. fuel: $${((Number(miles) / vehicleMpg) * fuelPrice).toFixed(2)}`
+                : "";
+
+            routeMessage.textContent =
+              `${optimize ? "Route optimized" : "Route calculated"}: ${miles} miles • ${minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`}${fuelCost}`;
+          } else {
+            routeMessage.textContent =
+              `Could not calculate route: ${status}`;
+          }
+        }
+      );
     }
-  );
-}
 
     updateStopCounter();
   </script>
