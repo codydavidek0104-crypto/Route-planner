@@ -5,14 +5,16 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 // Run the actual page script with controlled Maps responses and a minimal DOM.
-function setup(confirmations = [], { init = true } = {}) {
+function setup(confirmations = [], { init = true, storage = null, places = true } = {}) {
   const elements = new Map();
   function element() {
     return {
       value: '', textContent: '', hidden: true, children: [], listeners: {},
+      className: '', style: {},
       set innerHTML(value) { this.children = []; },
       appendChild(child) { this.children.push(child); },
       addEventListener(name, fn) { this.listeners[name] = fn; },
+      setAttribute(name, value) { this[name] = value; },
       focus() {},
     };
   }
@@ -24,7 +26,9 @@ function setup(confirmations = [], { init = true } = {}) {
   el('fuel-price').value = '4.50';
   const requests = [];
   const renderers = [];
+  const autocompletes = [];
   const stored = {};
+  if (storage) Object.assign(stored, storage);
   const confirmationMessages = [];
   // Fake timers: advance(ms) runs due callbacks in order.
   let now = 0;
@@ -42,6 +46,31 @@ function setup(confirmations = [], { init = true } = {}) {
     }
     now = target;
   };
+  const maps = {
+    Map: class {},
+    DirectionsService: class { route(options, callback) { requests.push({ options, callback }); } },
+    DirectionsRenderer: class {
+      constructor() { renderers.push(this); }
+      setMap(map) { this.map = map; }
+      setDirections(result) { this.result = result; }
+    },
+    TravelMode: { DRIVING: 'DRIVING' },
+  };
+  if (places) {
+    maps.places = {
+      Autocomplete: class {
+        constructor(input, options) {
+          this.input = input;
+          this.options = options;
+          this.listeners = {};
+          this.place = null;
+          autocompletes.push(this);
+        }
+        addListener(name, fn) { this.listeners[name] = fn; }
+        getPlace() { return this.place || {}; }
+      },
+    };
+  }
   const context = vm.createContext({
     document: { getElementById: el, createElement: element },
     setTimeout: (fn, ms) => { const id = nextTimerId++; timers.set(id, { fn, at: now + ms }); return id; },
@@ -56,16 +85,7 @@ function setup(confirmations = [], { init = true } = {}) {
         return confirmations.length ? confirmations.shift() : true;
       },
     },
-    google: { maps: {
-      Map: class {},
-      DirectionsService: class { route(options, callback) { requests.push({ options, callback }); } },
-      DirectionsRenderer: class {
-        constructor() { renderers.push(this); }
-        setMap(map) { this.map = map; }
-        setDirections(result) { this.result = result; }
-      },
-      TravelMode: { DRIVING: 'DRIVING' },
-    } },
+    google: { maps },
   });
   const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], context);
@@ -83,11 +103,15 @@ function setup(confirmations = [], { init = true } = {}) {
     assert.equal(renderers[0].map, null);
     assert.doesNotMatch(el('route-message').textContent, /miles|Est\. fuel/);
   };
-  if (init) { add('Start'); destination('End'); }
+  if (init) {
+    el('start').value = 'Origin';
+    add('Start');
+    destination('End');
+  }
   const savedRoutes = () => JSON.parse(stored.d7SavedRoutes || '{}');
   return {
     el, click, add, destination, requests, renderers, reply, calculate, stale,
-    savedRoutes, confirmationMessages, advance, context,
+    savedRoutes, confirmationMessages, advance, context, autocompletes,
   };
 }
 
@@ -139,7 +163,9 @@ test('failed recalculation leaves no previous route or totals', () => {
 test('optimization still reorders stops and publishes a current route', () => {
   const a = setup(); a.add('A'); a.add('B'); a.click('optimize-route');
   assert.equal(a.requests[0].options.optimizeWaypoints, true);
-  a.reply(0, 'OK', [1, 0]);
+  assert.equal(a.requests[0].options.origin, 'Origin');
+  // Middle stops are Start, A, and B. The start field stays the origin.
+  a.reply(0, 'OK', [0, 2, 1]);
   assert.equal(a.el('stops-container').children[1].children[1].textContent, 'B');
   assert.equal(a.el('route-stale-warning').hidden, true);
   assert.ok(a.renderers[0].map);
@@ -210,6 +236,7 @@ test('Maps script error or load timeout marks maps unavailable', () => {
 
   const errored = setup([], { init: false });
   vm.runInContext('handleMapsLoadFailure()', errored.context);
+  errored.el('start').value = 'Origin';
   errored.add('Start'); errored.destination('End'); errored.calculate();
   assert.equal(errored.el('route-message').textContent, MAPS_ERROR);
 
@@ -218,6 +245,7 @@ test('Maps script error or load timeout marks maps unavailable', () => {
   assert.equal(slow.el('route-message').textContent, '');
   slow.advance(1);
   assert.equal(slow.el('route-message').textContent, MAPS_ERROR);
+  slow.el('start').value = 'Origin';
   slow.add('Start'); slow.destination('End'); slow.calculate();
   assert.equal(slow.el('route-message').textContent, MAPS_ERROR);
   assert.equal(slow.requests.length, 0);
@@ -250,4 +278,184 @@ test('a timely route response cancels the timeout', () => {
   a.advance(20000);
   assert.equal(a.el('route-message').textContent, message);
   assert.ok(a.renderers[0].map);
+});
+
+test('start is required, used as the route origin, and not reordered by Optimize', () => {
+  const a = setup();
+  a.el('start').value = '   ';
+  a.calculate();
+  assert.equal(a.el('route-message').textContent, 'Enter a starting address.');
+  assert.equal(a.requests.length, 0);
+  a.click('optimize-route');
+  assert.equal(a.el('route-message').textContent, 'Enter a starting address.');
+  assert.equal(a.requests.length, 0);
+
+  a.el('start').value = 'Depot';
+  a.calculate();
+  assert.equal(a.requests[0].options.origin, 'Depot');
+  assert.equal(a.requests[0].options.destination, 'End');
+  assert.deepEqual(
+    [...a.requests[0].options.waypoints.map((waypoint) => waypoint.location)],
+    ['Start']
+  );
+
+  a.add('A');
+  a.add('B');
+  a.click('optimize-route');
+  const optimizeRequest = a.requests.at(-1);
+  assert.equal(optimizeRequest.options.origin, 'Depot');
+  assert.equal(optimizeRequest.options.optimizeWaypoints, true);
+  assert.deepEqual(
+    [...optimizeRequest.options.waypoints.map((waypoint) => waypoint.location)],
+    ['Start', 'A', 'B']
+  );
+  a.reply(a.requests.length - 1, 'OK', [2, 0, 1]);
+  assert.equal(a.el('start').value, 'Depot');
+  assert.equal(a.el('stops-container').children[0].children[1].textContent, 'B');
+  assert.equal(a.el('stops-container').children[1].children[1].textContent, 'Start');
+  assert.equal(a.el('stops-container').children[2].children[1].textContent, 'A');
+  assert.equal(a.el('route-stale-warning').hidden, true);
+});
+
+test('the stop limit counts only stops between start and destination', () => {
+  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /id="start"/);
+  assert.match(html, /up to 20 stops between the start and destination/);
+
+  const a = setup();
+  assert.match(a.el('stop-counter').textContent, /1 of 20 stops between start and destination/);
+  for (let i = 0; i < 19; i += 1) a.add(`Stop ${i}`);
+  assert.match(a.el('stop-counter').textContent, /20 of 20 stops between start and destination/);
+  assert.equal(a.el('add-stop').disabled, true);
+  assert.equal(a.el('stop-input').disabled, true);
+  a.el('stop-input').value = 'Extra';
+  a.click('add-stop');
+  assert.equal(a.el('route-message').textContent, 'You have reached the 20-stop limit.');
+  assert.equal(a.el('stops-container').children.length, 20);
+  assert.equal(a.el('start').value, 'Origin');
+});
+
+test('autocomplete is attached to start, stops including newly added ones, and destination', () => {
+  const a = setup();
+  const boundTo = (input) => a.autocompletes.some((autocomplete) => autocomplete.input === input);
+  assert.equal(boundTo(a.el('start')), true);
+  assert.equal(boundTo(a.el('stop-input')), true);
+  assert.equal(boundTo(a.el('destination')), true);
+  assert.equal(boundTo(a.el('stops-container').children[0].children[1]), true);
+
+  const before = a.autocompletes.length;
+  a.add('Fresh market');
+  const added = a.el('stops-container').children.at(-1).children[1];
+  assert.equal(added.textContent, 'Fresh market');
+  assert.ok(a.autocompletes.length > before);
+  for (const item of a.el('stops-container').children) {
+    assert.equal(boundTo(item.children[1]), true);
+  }
+
+  const startAutocomplete = a.autocompletes.find((autocomplete) => autocomplete.input === a.el('start'));
+  assert.equal(startAutocomplete.options.strictBounds, false);
+  assert.equal(startAutocomplete.options.bounds.north, 42);
+  assert.ok(startAutocomplete.options.bounds.south < startAutocomplete.options.bounds.north);
+  assert.deepEqual([...startAutocomplete.options.fields], ['formatted_address']);
+});
+
+test('picking a suggestion fills in the formatted address', () => {
+  const a = setup();
+  const pick = (input, formatted) => {
+    const autocomplete = [...a.autocompletes].reverse().find((item) => item.input === input);
+    autocomplete.place = { formatted_address: formatted };
+    autocomplete.listeners.place_changed();
+  };
+
+  pick(a.el('start'), '100 Capitol Mall, Sacramento, CA');
+  assert.equal(a.el('start').value, '100 Capitol Mall, Sacramento, CA');
+
+  pick(a.el('destination'), '1 Dr Carlton B Goodlett Pl, San Francisco, CA');
+  assert.equal(a.el('destination').value, '1 Dr Carlton B Goodlett Pl, San Francisco, CA');
+
+  pick(a.el('stop-input'), '500 J St, Sacramento, CA');
+  assert.equal(a.el('stop-input').value, '500 J St, Sacramento, CA');
+  a.click('add-stop');
+  const added = a.el('stops-container').children.at(-1).children[1];
+  assert.equal(added.textContent, '500 J St, Sacramento, CA');
+
+  pick(added, '800 K St, Sacramento, CA');
+  assert.equal(added.value, '800 K St, Sacramento, CA');
+  assert.equal(added.textContent, '800 K St, Sacramento, CA');
+
+  a.el('stop-input').value = 'plain address, no suggestion';
+  const addAutocomplete = [...a.autocompletes].reverse()
+    .find((item) => item.input === a.el('stop-input'));
+  addAutocomplete.place = { name: 'plain address, no suggestion' };
+  addAutocomplete.listeners.place_changed();
+  assert.equal(a.el('stop-input').value, 'plain address, no suggestion');
+});
+
+test('the page still works when Places is missing', () => {
+  const a = setup([], { places: false });
+  assert.equal(a.autocompletes.length, 0);
+  a.el('start').value = 'Depot';
+  a.add('Typed stop');
+  a.destination('Typed end');
+  a.calculate();
+  a.reply(0);
+  assert.equal(a.requests[0].options.origin, 'Depot');
+  assert.match(a.el('route-message').textContent, /Route calculated/);
+  assert.equal(a.el('stops-container').children.at(-1).children[1].textContent, 'Typed stop');
+});
+
+test('an old saved route without a start uses its first stop as the start', () => {
+  const a = setup([], {
+    storage: {
+      d7SavedRoutes: JSON.stringify({
+        Legacy: {
+          stops: ['Old Start', 'Mid', 'Late'],
+          destination: 'Old End',
+          vehicleMpg: '12',
+          fuelPrice: '3.25',
+        },
+      }),
+    },
+  });
+  a.el('saved-route-select').value = 'Legacy';
+  a.click('load-route');
+  assert.equal(a.el('start').value, 'Old Start');
+  assert.equal(a.el('destination').value, 'Old End');
+  assert.equal(a.el('vehicle-mpg').value, '12');
+  assert.equal(a.el('fuel-price').value, '3.25');
+  assert.equal(a.el('stops-container').children.length, 2);
+  assert.equal(a.el('stops-container').children[0].children[1].textContent, 'Mid');
+  assert.equal(a.el('stops-container').children[1].children[1].textContent, 'Late');
+
+  a.el('route-name').value = 'Current';
+  a.el('start').value = 'Depot';
+  a.click('save-route');
+  assert.equal(a.savedRoutes().Current.start, 'Depot');
+  assert.deepEqual([...a.savedRoutes().Current.stops], ['Mid', 'Late']);
+
+  a.el('start').value = 'Changed';
+  a.el('saved-route-select').value = 'Current';
+  a.click('load-route');
+  assert.equal(a.el('start').value, 'Depot');
+  assert.equal(a.el('stops-container').children[0].children[1].textContent, 'Mid');
+  assert.equal(a.el('stops-container').children.length, 2);
+});
+
+test('editing the start clears the result', () => {
+  const a = setup();
+  a.calculate();
+  a.reply(0);
+  assert.match(a.el('route-message').textContent, /Route calculated/);
+  a.el('start').value = 'New depot';
+  a.el('start').listeners.input();
+  a.stale();
+
+  a.calculate();
+  a.reply(1);
+  const startAutocomplete = [...a.autocompletes].reverse()
+    .find((item) => item.input === a.el('start'));
+  startAutocomplete.place = { formatted_address: '200 I St, Sacramento, CA' };
+  startAutocomplete.listeners.place_changed();
+  assert.equal(a.el('start').value, '200 I St, Sacramento, CA');
+  a.stale();
 });
