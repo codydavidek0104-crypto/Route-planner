@@ -219,7 +219,8 @@
     }
 
     .stop-item input.stop-address {
-      width: auto;
+      /* Let flex size the field; an input's intrinsic width overflows phones. */
+      width: 0;
       padding: 8px 10px;
       border-color: transparent;
       background: transparent;
@@ -924,11 +925,7 @@
       attachAutocomplete(startInput, () => invalidateRoute());
       attachAutocomplete(stopInput);
       attachAutocomplete(destinationInput, () => invalidateRoute());
-      for (const item of stopsContainer.children) {
-        const field = item.children && item.children[1];
-        if (!field) continue;
-        attachAutocomplete(field, () => onStopFormatted(field));
-      }
+      // Stop rows attach on focus (see renderStops).
     }
 
     function updateStopCounter() {
@@ -973,7 +970,12 @@
           stopAddress.textContent = stopAddress.value;
           invalidateRoute();
         });
-        attachAutocomplete(stopAddress, () => onStopFormatted(stopAddress));
+        // Attach Places when the row is first focused. renderStops rebuilds
+        // every row, and each Autocomplete adds a .pac-container to <body>
+        // that is never removed, so attaching eagerly leaks one per row per render.
+        stopAddress.addEventListener("focus", () => {
+          attachAutocomplete(stopAddress, () => onStopFormatted(stopAddress));
+        });
 
         const removeButton = document.createElement("button");
         removeButton.className = "remove-button";
@@ -1029,13 +1031,15 @@
     stopInput.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       // Places uses Enter to pick a suggestion. Don't also add the stop
-      // while that dropdown is open. A missing querySelector (tests, or
-      // Places not loaded) still adds the typed address.
+      // while a suggestion dropdown is open. Every autocomplete field has its
+      // own .pac-container, so check all of them. A missing querySelectorAll
+      // (tests, or Places not loaded) still adds the typed address.
       try {
-        if (typeof document.querySelector === "function") {
-          const pac = document.querySelector(".pac-container");
-          const display = pac && pac.style && pac.style.display;
-          if (pac && display !== "none" && pac.offsetParent !== null) return;
+        if (typeof document.querySelectorAll === "function") {
+          const dropdownOpen = [...document.querySelectorAll(".pac-container")].some(
+            (pac) => pac.style.display !== "none" && pac.offsetParent !== null
+          );
+          if (dropdownOpen) return;
         }
       } catch {
         // Ignore and add the typed stop.

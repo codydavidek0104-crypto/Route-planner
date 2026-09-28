@@ -439,16 +439,25 @@ test('autocomplete is attached to start, stops including newly added ones, and d
   assert.equal(boundTo(a.el('start')), true);
   assert.equal(boundTo(a.el('stop-input')), true);
   assert.equal(boundTo(a.el('destination')), true);
-  assert.equal(boundTo(a.el('stops-container').children[0].children[1]), true);
+  // Stop rows attach lazily on first focus, so re-rendering rows doesn't
+  // create a new Autocomplete (and leaked .pac-container) for every row.
+  const firstRow = a.el('stops-container').children[0].children[1];
+  assert.equal(boundTo(firstRow), false);
+  firstRow.listeners.focus();
+  assert.equal(boundTo(firstRow), true);
 
   const before = a.autocompletes.length;
   a.add('Fresh market');
+  a.add('Another');
+  assert.equal(a.autocompletes.length, before);
   const added = a.el('stops-container').children.at(-1).children[1];
-  assert.equal(added.textContent, 'Fresh market');
-  assert.ok(a.autocompletes.length > before);
+  assert.equal(added.textContent, 'Another');
   for (const item of a.el('stops-container').children) {
+    item.children[1].listeners.focus();
+    item.children[1].listeners.focus();
     assert.equal(boundTo(item.children[1]), true);
   }
+  assert.equal(a.autocompletes.length, before + 3);
 
   const startAutocomplete = a.autocompletes.find((autocomplete) => autocomplete.input === a.el('start'));
   assert.equal(startAutocomplete.options.strictBounds, false);
@@ -477,6 +486,7 @@ test('picking a suggestion fills in the formatted address', () => {
   const added = a.el('stops-container').children.at(-1).children[1];
   assert.equal(added.textContent, '500 J St, Sacramento, CA');
 
+  added.listeners.focus();
   pick(added, '800 K St, Sacramento, CA');
   assert.equal(added.value, '800 K St, Sacramento, CA');
   assert.equal(added.textContent, '800 K St, Sacramento, CA');
@@ -558,4 +568,20 @@ test('editing the start clears the result', () => {
   startAutocomplete.listeners.place_changed();
   assert.equal(a.el('start').value, '200 I St, Sacramento, CA');
   a.stale();
+});
+
+test('Enter in the add-stop field waits while any suggestion dropdown is open', () => {
+  const a = setup();
+  const hidden = { style: { display: 'none' }, offsetParent: null };
+  const open = { style: { display: '' }, offsetParent: {} };
+  let pacs = [hidden, open, hidden];
+  a.context.document.querySelectorAll = () => pacs;
+  const before = a.el('stops-container').children.length;
+  a.el('stop-input').value = 'Crocker';
+  a.el('stop-input').listeners.keydown({ key: 'Enter' });
+  assert.equal(a.el('stops-container').children.length, before);
+  pacs = [hidden, hidden, hidden];
+  a.el('stop-input').listeners.keydown({ key: 'Enter' });
+  assert.equal(a.el('stops-container').children.length, before + 1);
+  assert.equal(a.el('stops-container').children.at(-1).children[1].textContent, 'Crocker');
 });
