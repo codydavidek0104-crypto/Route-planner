@@ -366,6 +366,47 @@
       text-align: center;
     }
 
+    .navigation-controls, .trip-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .navigation-controls button, .trip-actions button {
+      min-height: 48px;
+      padding: 12px 16px;
+      background: var(--red);
+      color: var(--white);
+    }
+
+    .navigation-controls button:hover, .trip-actions button:hover {
+      background: var(--dark-red);
+    }
+
+    .location-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 14px 0 0;
+    }
+
+    .location-option input {
+      width: 20px;
+      height: 20px;
+      flex: 0 0 auto;
+    }
+
+    .trip-panel {
+      margin-top: 18px;
+      padding: 18px;
+      border: 1px solid #e1e1e1;
+      border-radius: 12px;
+      background: #fafafa;
+    }
+
+    .trip-panel p { margin: 0 0 8px; overflow-wrap: anywhere; }
+
     .footer-note {
       margin: 18px 0 0;
       color: #888888;
@@ -537,6 +578,26 @@
       <p id="route-stale-warning" class="route-message" role="status" hidden>
         Addresses changed. Results are out of date. Calculate or Optimize Route again.
       </p>
+      <div id="navigation-results" hidden>
+        <label class="location-option" for="start-from-location">
+          <input id="start-from-location" type="checkbox">
+          Start from my location
+        </label>
+        <div id="navigation-controls" class="navigation-controls"></div>
+        <div class="navigation-controls">
+          <button id="start-trip" type="button">Start trip</button>
+        </div>
+      </div>
+      <section id="trip-panel" class="trip-panel" aria-live="polite" hidden>
+        <p id="trip-stop-number"></p>
+        <p id="trip-stop-address"></p>
+        <div class="trip-actions">
+          <button id="navigate-stop" type="button">Navigate to this stop</button>
+          <button id="trip-next" type="button">Arrived / Next</button>
+          <button id="trip-back" type="button">Back</button>
+          <button id="end-trip" type="button">End trip</button>
+        </div>
+      </section>
       <div id="map"></div>
     </section>
 
@@ -617,14 +678,118 @@
     const loadRouteButton = document.getElementById("load-route");
     const deleteRouteButton = document.getElementById("delete-route");
     const SAVED_ROUTES_KEY = "d7SavedRoutes";
+    const TRIP_PROGRESS_KEY = "d7TripProgress";
     const routeStaleWarning = document.getElementById("route-stale-warning");
+    const navigationResults = document.getElementById("navigation-results");
+    const navigationControls = document.getElementById("navigation-controls");
+    const startFromLocation = document.getElementById("start-from-location");
+    const tripPanel = document.getElementById("trip-panel");
+    const tripStopNumber = document.getElementById("trip-stop-number");
+    const tripStopAddress = document.getElementById("trip-stop-address");
+    const tripNextButton = document.getElementById("trip-next");
+    const tripBackButton = document.getElementById("trip-back");
     let routeRequestId = 0;
     let routeRequestPending = false;
     let routeShown = false;
+    let navigationPoints = null;
+    let tripProgress = null;
+
+    function mapsUrl(destination, origin, waypoints = []) {
+      const parameters = ["api=1"];
+      if (origin && !startFromLocation.checked) {
+        parameters.push("origin=" + encodeURIComponent(origin));
+      }
+      parameters.push("destination=" + encodeURIComponent(destination));
+      if (waypoints.length) {
+        parameters.push("waypoints=" + waypoints.map(encodeURIComponent).join("|"));
+      }
+      parameters.push("travelmode=driving");
+      return "https://www.google.com/maps/dir/?" + parameters.join("&");
+    }
+
+    function showNavigation(points) {
+      navigationPoints = points;
+      navigationControls.innerHTML = "";
+      // Each leg has an origin, up to nine intermediate stops, and a destination.
+      const legs = [];
+      for (let first = 0; first < points.length - 1; first += 10) {
+        legs.push(points.slice(first, Math.min(first + 11, points.length)));
+      }
+      legs.forEach((leg, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = legs.length === 1 ? "Navigate" :
+          `Navigate leg ${index + 1} of ${legs.length}`;
+        button.addEventListener("click", () => {
+          window.open(mapsUrl(leg[leg.length - 1], leg[0], leg.slice(1, -1)), "_blank");
+        });
+        navigationControls.appendChild(button);
+      });
+      navigationResults.hidden = false;
+    }
+
+    function renderTrip() {
+      tripPanel.hidden = !tripProgress;
+      if (!tripProgress) return;
+      const { addresses, index } = tripProgress;
+      tripStopNumber.textContent = `Stop ${index + 1} of ${addresses.length}`;
+      tripStopAddress.textContent = addresses[index];
+      tripBackButton.disabled = index === 0;
+      tripNextButton.disabled = index === addresses.length - 1;
+    }
+
+    function saveTrip() {
+      try {
+        localStorage.setItem(TRIP_PROGRESS_KEY, JSON.stringify(tripProgress));
+      } catch {
+        routeMessage.textContent = "Could not save trip progress on this device.";
+      }
+      renderTrip();
+    }
+
+    document.getElementById("start-trip").addEventListener("click", () => {
+      if (!navigationPoints) return;
+      tripProgress = { addresses: navigationPoints.slice(1), index: 0 };
+      saveTrip();
+    });
+    document.getElementById("navigate-stop").addEventListener("click", () => {
+      if (tripProgress) window.open(mapsUrl(tripProgress.addresses[tripProgress.index]), "_blank");
+    });
+    tripNextButton.addEventListener("click", () => {
+      if (tripProgress && tripProgress.index < tripProgress.addresses.length - 1) {
+        tripProgress.index += 1;
+        saveTrip();
+      }
+    });
+    tripBackButton.addEventListener("click", () => {
+      if (tripProgress && tripProgress.index > 0) {
+        tripProgress.index -= 1;
+        saveTrip();
+      }
+    });
+    document.getElementById("end-trip").addEventListener("click", () => {
+      tripProgress = null;
+      try { localStorage.removeItem(TRIP_PROGRESS_KEY); } catch { /* Storage may be unavailable. */ }
+      renderTrip();
+    });
+
+    try {
+      const savedTrip = JSON.parse(localStorage.getItem(TRIP_PROGRESS_KEY));
+      if (savedTrip && Array.isArray(savedTrip.addresses) &&
+        savedTrip.addresses.length > 0 && savedTrip.addresses.every(address => typeof address === "string") &&
+        Number.isInteger(savedTrip.index) && savedTrip.index >= 0 &&
+        savedTrip.index < savedTrip.addresses.length) {
+        tripProgress = savedTrip;
+      }
+    } catch { /* Ignore invalid or unavailable storage. */ }
+    renderTrip();
 
     function clearRouteResults() {
       if (directionsRenderer) directionsRenderer.setMap(null);
       routeShown = false;
+      navigationPoints = null;
+      navigationResults.hidden = true;
+      navigationControls.innerHTML = "";
       routeMessage.textContent = "";
     }
 
@@ -925,18 +1090,19 @@
     }
 
     if (status === "OK") {
+      const middleStops = requestedStops.slice(1);
+      const order = optimize ? result.routes[0].waypoint_order :
+        middleStops.map((_, index) => index);
+      const orderedStops = order.map(index => middleStops[index]);
       if (optimize) {
-        const middleStops = requestedStops.slice(1);
-        const reordered = result.routes[0].waypoint_order.map(
-          index => middleStops[index]
-        );
-        stops.splice(0, stops.length, origin, ...reordered);
+        stops.splice(0, stops.length, origin, ...orderedStops);
         renderStops();
       }
         directionsRenderer.setDirections(result);
         directionsRenderer.setMap(map);
         routeShown = true;
         routeStaleWarning.hidden = true;
+        showNavigation([origin, ...orderedStops, destination]);
 
         let totalDistance = 0;
         let totalDuration = 0;
