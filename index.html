@@ -144,6 +144,7 @@
     }
 
     button {
+      min-height: 44px;
       border: 0;
       border-radius: 9px;
       font-size: 15px;
@@ -427,6 +428,35 @@
 
     .trip-panel p { margin: 0 0 8px; overflow-wrap: anywhere; }
 
+    .report-panel, .report-history {
+      margin-top: 22px;
+      padding: 18px;
+      border: 1px solid #e1e1e1;
+      border-radius: 12px;
+      background: #fafafa;
+      overflow-wrap: anywhere;
+    }
+
+    .report-panel h2, .report-history h2 { margin: 0 0 14px; font-size: 20px; }
+    .report-panel h3 { margin: 18px 0 10px; font-size: 16px; }
+    .report-panel p, .report-history p { line-height: 1.5; }
+    #report-stops { padding-left: 24px; }
+    #report-stops li { margin-bottom: 12px; line-height: 1.5; }
+    #report-notes {
+      width: 100%;
+      min-height: 100px;
+      padding: 12px;
+      border: 1px solid #cfcfcf;
+      border-radius: 9px;
+      font: inherit;
+      font-size: 16px;
+      resize: vertical;
+    }
+    .report-entry { display: flex; gap: 10px; margin-top: 12px; }
+    .report-entry button { padding: 12px; overflow-wrap: anywhere; }
+    .report-entry button:first-child { flex: 1; min-width: 0; text-align: left; }
+    #report-message { min-height: 22px; }
+
     .footer-note {
       margin: 18px 0 0;
       color: #888888;
@@ -451,6 +481,10 @@
       .input-row {
         flex-direction: column;
       }
+
+      .save-row, .report-entry { flex-direction: column; }
+      .fuel-settings { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .navigation-controls button, .trip-actions button { flex: 1 1 140px; }
 
       .add-button {
         min-height: 48px;
@@ -632,8 +666,35 @@
           <button id="navigate-stop" type="button">Navigate to this stop</button>
           <button id="trip-next" type="button">Arrived / Next</button>
           <button id="trip-back" type="button">Back</button>
+          <button id="finish-trip" type="button" hidden>Finish trip</button>
           <button id="end-trip" type="button">End trip</button>
         </div>
+      </section>
+      <section id="trip-report" class="report-panel" hidden>
+        <h2>Trip Report</h2>
+        <p id="report-status"></p>
+        <label for="driver-name">Driver name (optional)</label>
+        <input id="driver-name" type="text" autocomplete="name" placeholder="Enter driver name">
+        <div id="report-summary"></div>
+        <h3>Stops</h3>
+        <ol id="report-stops"></ol>
+        <label for="report-notes">Notes (optional)</label>
+        <textarea id="report-notes" placeholder="Add trip notes"></textarea>
+        <div class="trip-actions">
+          <button id="copy-report" type="button">Copy report</button>
+          <button id="email-report" type="button">Email report</button>
+          <button id="share-report" type="button" hidden>Share</button>
+        </div>
+        <p id="report-message" role="status" aria-live="polite"></p>
+      </section>
+      <section class="report-history">
+        <h2>Trip reports</h2>
+        <p>Saved on this device. The most recent 100 reports are kept.</p>
+        <div class="trip-actions">
+          <button id="export-reports" type="button">Export CSV</button>
+        </div>
+        <div id="trip-reports-list"></div>
+        <p id="history-message" role="status" aria-live="polite"></p>
       </section>
       <div id="map"></div>
     </section>
@@ -718,6 +779,8 @@
     const deleteRouteButton = document.getElementById("delete-route");
     const SAVED_ROUTES_KEY = "d7SavedRoutes";
     const TRIP_PROGRESS_KEY = "d7TripProgress";
+    const TRIP_REPORTS_KEY = "d7TripReports";
+    const DRIVER_NAME_KEY = "d7DriverName";
     const routeStaleWarning = document.getElementById("route-stale-warning");
     const navigationResults = document.getElementById("navigation-results");
     const navigationControls = document.getElementById("navigation-controls");
@@ -727,11 +790,20 @@
     const tripStopAddress = document.getElementById("trip-stop-address");
     const tripNextButton = document.getElementById("trip-next");
     const tripBackButton = document.getElementById("trip-back");
+    const finishTripButton = document.getElementById("finish-trip");
+    const reportPanel = document.getElementById("trip-report");
+    const reportMessage = document.getElementById("report-message");
+    const driverNameInput = document.getElementById("driver-name");
+    const reportNotes = document.getElementById("report-notes");
+    const shareReportButton = document.getElementById("share-report");
+    const historyMessage = document.getElementById("history-message");
     let routeRequestId = 0;
     let routeRequestPending = false;
     let routeShown = false;
     let navigationPoints = null;
+    let routePlan = null;
     let tripProgress = null;
+    let currentReport = null;
 
     function mapsUrl(destination, origin, waypoints = []) {
       const parameters = ["api=1"];
@@ -774,7 +846,9 @@
       tripStopNumber.textContent = `Stop ${index + 1} of ${addresses.length}`;
       tripStopAddress.textContent = addresses[index];
       tripBackButton.disabled = index === 0;
-      tripNextButton.disabled = index === addresses.length - 1;
+      // A repeated arrival, including at the destination, replaces the earlier time.
+      tripNextButton.disabled = false;
+      finishTripButton.hidden = !tripProgress.completedAt[addresses.length - 1];
     }
 
     function saveTrip() {
@@ -787,16 +861,32 @@
     }
 
     document.getElementById("start-trip").addEventListener("click", () => {
-      if (!navigationPoints) return;
-      tripProgress = { addresses: navigationPoints.slice(1), index: 0 };
+      if (!navigationPoints || !routePlan) return;
+      // Preserve an active trip until the driver explicitly finishes or ends it.
+      if (tripProgress) {
+        routeMessage.textContent = "Finish or end the current trip before starting another.";
+        return;
+      }
+      const mpg = positiveNumber(vehicleMpgInput.value);
+      const fuelPrice = positiveNumber(fuelPriceInput.value);
+      tripProgress = {
+        id: newReportId(), addresses: navigationPoints.slice(1), index: 0,
+        startedAt: new Date().toISOString(),
+        completedAt: navigationPoints.slice(1).map(() => null),
+        routeSnapshot: {
+          ...JSON.parse(JSON.stringify(routePlan)), mpg, fuelPrice,
+          fuelCost: mpg && fuelPrice ? routePlan.plannedMiles / mpg * fuelPrice : null
+        }
+      };
       saveTrip();
     });
     document.getElementById("navigate-stop").addEventListener("click", () => {
       if (tripProgress) window.open(mapsUrl(tripProgress.addresses[tripProgress.index]), "_blank");
     });
     tripNextButton.addEventListener("click", () => {
-      if (tripProgress && tripProgress.index < tripProgress.addresses.length - 1) {
-        tripProgress.index += 1;
+      if (tripProgress) {
+        tripProgress.completedAt[tripProgress.index] = new Date().toISOString();
+        if (tripProgress.index < tripProgress.addresses.length - 1) tripProgress.index += 1;
         saveTrip();
       }
     });
@@ -807,9 +897,278 @@
       }
     });
     document.getElementById("end-trip").addEventListener("click", () => {
+      if (!tripProgress) return;
+      if (tripProgress.completedAt.some(time => !time) &&
+        !window.confirm("End trip early? The report will show it as incomplete.")) return;
+      finishTrip();
+    });
+    finishTripButton.addEventListener("click", () => {
+      if (tripProgress && tripProgress.completedAt[tripProgress.addresses.length - 1]) finishTrip();
+    });
+
+    function positiveNumber(value) {
+      const number = Number(value);
+      return Number.isFinite(number) && number > 0 ? number : null;
+    }
+
+    function newReportId() {
+      return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+    }
+
+    function validTime(value) {
+      return typeof value === "string" && Number.isFinite(Date.parse(value));
+    }
+
+    function readDriverName() {
+      try { return localStorage.getItem(DRIVER_NAME_KEY) || ""; } catch { return ""; }
+    }
+
+    function getTripReports() {
+      try {
+        const reports = JSON.parse(localStorage.getItem(TRIP_REPORTS_KEY));
+        return Array.isArray(reports) ? reports.filter(report => report && typeof report.id === "string" &&
+          validTime(report.endedAt) && Array.isArray(report.addresses) &&
+          report.addresses.every(address => typeof address === "string") &&
+          Array.isArray(report.completedAt) && report.routeSnapshot) : [];
+      } catch { return []; }
+    }
+
+    function writeTripReports(reports) {
+      try {
+        localStorage.setItem(TRIP_REPORTS_KEY, JSON.stringify(reports.slice(0, 100)));
+        return true;
+      } catch { return false; }
+    }
+
+    function reportDate(timestamp) {
+      const date = new Date(timestamp);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    }
+
+    function timestampText(timestamp) {
+      return validTime(timestamp) ? new Date(timestamp).toLocaleString() : "Not recorded";
+    }
+
+    function numberText(value, digits = 1, suffix = "", prefix = "") {
+      return typeof value === "number" && Number.isFinite(value) ? prefix + value.toFixed(digits) + suffix : "Not recorded";
+    }
+
+    function stopsCompleted(report) {
+      return report.addresses.filter((_, index) => validTime(report.completedAt[index])).length;
+    }
+
+    function finishTrip() {
+      const endedAt = new Date().toISOString();
+      const report = {
+        id: tripProgress.id, date: reportDate(tripProgress.startedAt || endedAt),
+        driver: readDriverName(), startedAt: tripProgress.startedAt, endedAt,
+        elapsedMinutes: tripProgress.startedAt ? Math.max(0, (Date.parse(endedAt) - Date.parse(tripProgress.startedAt)) / 60000) : null,
+        addresses: [...tripProgress.addresses], completedAt: [...tripProgress.completedAt],
+        routeSnapshot: JSON.parse(JSON.stringify(tripProgress.routeSnapshot)),
+        notes: currentReport?.id === tripProgress.id ? currentReport.notes : ""
+      };
+      report.incomplete = stopsCompleted(report) < report.addresses.length;
+      // Save first: a storage failure must not discard the active trip.
+      const reports = [report, ...getTripReports().filter(item => item.id !== report.id)];
+      if (!writeTripReports(reports)) {
+        showReport(report);
+        reportMessage.textContent = "Could not save the report on this device. Your trip is still active; try finishing again. You can copy or share this report now.";
+        return;
+      }
       tripProgress = null;
-      try { localStorage.removeItem(TRIP_PROGRESS_KEY); } catch { /* Storage may be unavailable. */ }
+      try { localStorage.removeItem(TRIP_PROGRESS_KEY); } catch { /* A saved report ID also prevents stale restoration. */ }
       renderTrip();
+      renderReportHistory();
+      showReport(report);
+      reportMessage.textContent = "Report saved.";
+    }
+
+    function reportSummaryLines(report) {
+      const route = report.routeSnapshot;
+      return [
+        `Date: ${report.date}`,
+        `Status: ${report.incomplete ? "Incomplete" : "Complete"}`,
+        `Start time: ${timestampText(report.startedAt)}`,
+        `End time: ${timestampText(report.endedAt)}`,
+        `Total elapsed time: ${numberText(report.elapsedMinutes, 1, " min")}`,
+        `Stops completed: ${stopsCompleted(report)} of ${report.addresses.length}`,
+        `Start address: ${route.start || "Not recorded"}`,
+        `Destination: ${route.destination}`,
+        `Planned route miles: ${numberText(route.plannedMiles)}`,
+        `Planned route drive time: ${numberText(route.plannedMinutes, 1, " min")}`,
+        `Planned route estimated fuel cost: ${numberText(route.fuelCost, 2, "", "$")}`,
+        `MPG used: ${numberText(route.mpg)}; fuel price used: ${numberText(route.fuelPrice, 2, " per gallon", "$")}`
+      ];
+    }
+
+    function reportStopText(report, index) {
+      const completed = report.completedAt[index];
+      return `${report.addresses[index]} — ${validTime(completed) ? timestampText(completed) : "Not completed"}`;
+    }
+
+    function reportPlainText(report) {
+      return ["D7 Route trip report", `Driver: ${report.driver || "Not specified"}`,
+        ...reportSummaryLines(report), "", "Stops (including destination):",
+        ...report.addresses.map((_, index) => `${index + 1}. ${reportStopText(report, index)}`),
+        "", `Notes: ${report.notes || "None"}`].join("\n");
+    }
+
+    function reportSubject(report) {
+      return `D7 Route trip report - ${report.date} - ${report.driver || "Not specified"}`;
+    }
+
+    function reportMailto(report) {
+      return "mailto:?subject=" + encodeURIComponent(reportSubject(report)) +
+        "&body=" + encodeURIComponent(reportPlainText(report));
+    }
+
+    function showReport(report) {
+      currentReport = report;
+      reportPanel.hidden = false;
+      driverNameInput.value = report.driver;
+      reportNotes.value = report.notes;
+      document.getElementById("report-status").textContent = report.incomplete ? "Incomplete trip" : "Complete trip";
+      const summary = document.getElementById("report-summary");
+      summary.innerHTML = "";
+      reportSummaryLines(report).forEach(line => {
+        const paragraph = document.createElement("p");
+        paragraph.textContent = line;
+        summary.appendChild(paragraph);
+      });
+      const list = document.getElementById("report-stops");
+      list.innerHTML = "";
+      report.addresses.forEach((_, index) => {
+        const item = document.createElement("li");
+        item.textContent = reportStopText(report, index);
+        list.appendChild(item);
+      });
+      shareReportButton.hidden = typeof navigator === "undefined" || typeof navigator.share !== "function";
+      reportMessage.textContent = "";
+    }
+
+    function renderReportHistory() {
+      const list = document.getElementById("trip-reports-list");
+      const reports = getTripReports();
+      list.innerHTML = "";
+      document.getElementById("export-reports").disabled = reports.length === 0;
+      if (!reports.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "No trip reports yet.";
+        list.appendChild(empty);
+      }
+      reports.forEach(report => {
+        const row = document.createElement("div");
+        row.className = "report-entry";
+        const open = document.createElement("button");
+        open.type = "button";
+        open.textContent = `${report.date} — ${report.driver || "No driver name"} — ${stopsCompleted(report)} of ${report.addresses.length} stops${report.incomplete ? " · Incomplete" : ""}`;
+        open.addEventListener("click", () => {
+          showReport(report);
+          reportPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "Delete";
+        remove.setAttribute("aria-label", `Delete trip report for ${report.date}, ${report.driver || "no driver name"}`);
+        remove.addEventListener("click", () => {
+          if (!window.confirm("Delete this trip report?")) return;
+          if (!writeTripReports(getTripReports().filter(item => item.id !== report.id))) {
+            historyMessage.textContent = "Could not delete the report on this device.";
+            return;
+          }
+          if (currentReport && currentReport.id === report.id) {
+            currentReport = null;
+            reportPanel.hidden = true;
+          }
+          historyMessage.textContent = "Report deleted.";
+          renderReportHistory();
+        });
+        row.appendChild(open);
+        row.appendChild(remove);
+        list.appendChild(row);
+      });
+    }
+
+    function updateReportDetails() {
+      if (!currentReport) return;
+      currentReport.driver = driverNameInput.value;
+      currentReport.notes = reportNotes.value;
+      const reports = getTripReports();
+      const index = reports.findIndex(report => report.id === currentReport.id);
+      if (index < 0) return; // An unsaved report remains available to copy/share.
+      reports[index] = currentReport;
+      reportMessage.textContent = writeTripReports(reports) ? "Report saved." : "Could not save report changes on this device.";
+      renderReportHistory();
+    }
+    driverNameInput.addEventListener("input", () => {
+      updateReportDetails();
+      try { localStorage.setItem(DRIVER_NAME_KEY, driverNameInput.value); }
+      catch { reportMessage.textContent = "Could not remember the driver name on this device."; }
+    });
+    reportNotes.addEventListener("input", updateReportDetails);
+
+    function copyReportFallback(text) {
+      const previousFocus = document.activeElement;
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      try {
+        textarea.select();
+        return document.execCommand("copy");
+      } finally {
+        textarea.remove();
+        if (previousFocus) previousFocus.focus();
+      }
+    }
+    document.getElementById("copy-report").addEventListener("click", async () => {
+      if (!currentReport) return;
+      const text = reportPlainText(currentReport);
+      try {
+        if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error("Clipboard unavailable");
+        await navigator.clipboard.writeText(text);
+      } catch {
+        try {
+          if (!copyReportFallback(text)) throw new Error("Copy failed");
+        } catch {
+          reportMessage.textContent = "Could not copy report. Try Email report instead.";
+          return;
+        }
+      }
+      reportMessage.textContent = "Copied!";
+    });
+    document.getElementById("email-report").addEventListener("click", () => {
+      if (currentReport) window.location.href = reportMailto(currentReport);
+    });
+    shareReportButton.addEventListener("click", async () => {
+      if (!currentReport || typeof navigator.share !== "function") return;
+      try { await navigator.share({ title: reportSubject(currentReport), text: reportPlainText(currentReport) }); }
+      catch (error) { if (error.name !== "AbortError") reportMessage.textContent = "Could not share report. Try Copy report instead."; }
+    });
+
+    function reportsCsv(reports) {
+      const rows = [["date", "driver", "start time", "end time", "elapsed minutes", "stops completed", "total stops",
+        "planned miles", "planned minutes", "MPG", "fuel price", "fuel cost", "notes"]];
+      reports.forEach(report => {
+        const route = report.routeSnapshot;
+        rows.push([report.date, report.driver, report.startedAt, report.endedAt, report.elapsedMinutes,
+          stopsCompleted(report), report.addresses.length, route.plannedMiles, route.plannedMinutes,
+          route.mpg, route.fuelPrice, route.fuelCost, report.notes]);
+      });
+      return rows.map(row => row.map(value => '"' + String(value ?? "").replace(/"/g, '""') + '"').join(",")).join("\r\n");
+    }
+    document.getElementById("export-reports").addEventListener("click", () => {
+      const reports = getTripReports();
+      if (!reports.length) return;
+      const url = URL.createObjectURL(new Blob(["\uFEFF", reportsCsv(reports)], { type: "text/csv;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "d7-trip-reports.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
 
     try {
@@ -818,15 +1177,29 @@
         savedTrip.addresses.length > 0 && savedTrip.addresses.every(address => typeof address === "string") &&
         Number.isInteger(savedTrip.index) && savedTrip.index >= 0 &&
         savedTrip.index < savedTrip.addresses.length) {
-        tripProgress = savedTrip;
+        // Older progress contains only addresses/index. Never invent historical times or mileage.
+        tripProgress = {
+          ...savedTrip,
+          id: typeof savedTrip.id === "string" && savedTrip.id ? savedTrip.id : newReportId(),
+          startedAt: validTime(savedTrip.startedAt) ? savedTrip.startedAt : null,
+          completedAt: savedTrip.addresses.map((_, index) => validTime(savedTrip.completedAt?.[index]) ? savedTrip.completedAt[index] : null),
+          routeSnapshot: {
+            start: null, stops: savedTrip.addresses.slice(0, -1), destination: savedTrip.addresses[savedTrip.addresses.length - 1],
+            plannedMiles: null, plannedMinutes: null, mpg: null, fuelPrice: null, fuelCost: null, legs: [],
+            ...savedTrip.routeSnapshot
+          }
+        };
+        if (getTripReports().some(report => report.id === tripProgress.id)) tripProgress = null;
       }
     } catch { /* Ignore invalid or unavailable storage. */ }
     renderTrip();
+    renderReportHistory();
 
     function clearRouteResults() {
       if (directionsRenderer) directionsRenderer.setMap(null);
       routeShown = false;
       navigationPoints = null;
+      routePlan = null;
       navigationResults.hidden = true;
       navigationControls.innerHTML = "";
       routeMessage.textContent = "";
@@ -1291,6 +1664,17 @@
               totalDistance += leg.distance.value;
               totalDuration += leg.duration.value;
             });
+
+            routePlan = {
+              start: origin, stops: navigationPoints.slice(1, -1), destination,
+              plannedMiles: totalDistance / 1609.344,
+              plannedMinutes: totalDuration / 60,
+              legs: result.routes[0].legs.map((leg, index) => ({
+                from: navigationPoints[index], to: navigationPoints[index + 1],
+                plannedMiles: leg.distance.value / 1609.344,
+                plannedMinutes: leg.duration.value / 60
+              }))
+            };
 
             const miles = (totalDistance / 1609.344).toFixed(1);
             const minutes = Math.round(totalDuration / 60);

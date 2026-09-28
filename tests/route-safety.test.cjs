@@ -5,17 +5,29 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 // Run the actual page script with controlled Maps responses and a minimal DOM.
-function setup(confirmations = [], { init = true, storage = {}, places = true } = {}) {
+function setup(confirmations = [], {
+  init = true, storage = {}, places = true, navigatorApi = {},
+  initialTime = Date.parse('2026-09-28T16:00:00Z')
+} = {}) {
   const elements = new Map();
-  function element() {
+  const downloads = [];
+  const blobs = [];
+  const fallbackCopies = [];
+  function element(tagName = 'div') {
     return {
+      tagName,
       value: '', textContent: '', hidden: true, children: [], listeners: {},
       className: '', style: {},
       set innerHTML(value) { this.children = []; },
-      appendChild(child) { this.children.push(child); },
+      appendChild(child) { this.children.push(child); child.parent = this; },
+      remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); },
+      click() {
+        if (this.tagName === 'a') downloads.push({ href: this.href, download: this.download });
+        return this.listeners.click?.();
+      },
       addEventListener(name, fn) { this.listeners[name] = fn; },
       setAttribute(name, value) { this[name] = value; },
-      focus() {},
+      focus() {}, select() {}, scrollIntoView() {},
     };
   }
   const el = id => {
@@ -72,7 +84,21 @@ function setup(confirmations = [], { init = true, storage = {}, places = true } 
     };
   }
   const context = vm.createContext({
-    document: { getElementById: el, createElement: element },
+    Date: class extends Date {
+      constructor(...args) { super(...(args.length ? args : [initialTime + now])); }
+      static now() { return initialTime + now; }
+    },
+    navigator: navigatorApi,
+    Blob,
+    URL: { createObjectURL(blob) { blobs.push(blob); return 'blob:report-test'; }, revokeObjectURL() {} },
+    document: {
+      getElementById: el, createElement: element, body: el('body'),
+      execCommand(command) {
+        assert.equal(command, 'copy');
+        fallbackCopies.push(el('body').children.at(-1).value);
+        return true;
+      },
+    },
     setTimeout: (fn, ms) => { const id = nextTimerId++; timers.set(id, { fn, at: now + ms }); return id; },
     clearTimeout: id => { timers.delete(id); },
     localStorage: {
@@ -81,6 +107,7 @@ function setup(confirmations = [], { init = true, storage = {}, places = true } 
       removeItem: key => { delete stored[key]; },
     },
     window: {
+      location: { href: '' },
       open: (url, target) => { opened.push({ url, target }); },
       confirm: message => {
         confirmationMessages.push(message);
@@ -95,9 +122,9 @@ function setup(confirmations = [], { init = true, storage = {}, places = true } 
   const click = id => el(id).listeners.click();
   const add = address => { el('stop-input').value = address; click('add-stop'); };
   const destination = address => { el('destination').value = address; el('destination').listeners.input(); };
-  const reply = (index, status = 'OK', order = []) => requests[index].callback({ routes: [{
+  const reply = (index, status = 'OK', order = [], legs = [{ distance: { value: 16093.44 }, duration: { value: 5100 } }]) => requests[index].callback({ routes: [{
     waypoint_order: order,
-    legs: [{ distance: { value: 16093.44 }, duration: { value: 5100 } }],
+    legs,
   }] }, status);
   const calculate = () => click('calculate-route');
   const stale = () => {
@@ -114,8 +141,213 @@ function setup(confirmations = [], { init = true, storage = {}, places = true } 
   return {
     el, click, add, destination, requests, renderers, reply, calculate, stale,
     savedRoutes, confirmationMessages, advance, context, autocompletes, stored, opened,
+    downloads, blobs, fallbackCopies,
   };
 }
+
+function beginTrip(a) {
+  a.calculate(); a.reply(a.requests.length - 1); a.click('start-trip');
+}
+
+function finishTwoStopTrip(a) {
+  beginTrip(a);
+  a.click('trip-next'); a.click('trip-next'); a.click('finish-trip');
+  return JSON.parse(a.stored.d7TripReports)[0];
+}
+
+test('trip start snapshots optimized addresses, per-leg estimates, and fuel inputs', () => {
+  const a = setup(); a.add('Second'); a.click('optimize-route');
+  a.reply(0, 'OK', [1, 0], [
+    { distance: { value: 1609.344 }, duration: { value: 60 } },
+    { distance: { value: 3218.688 }, duration: { value: 120 } },
+    { distance: { value: 4828.032 }, duration: { value: 180 } },
+  ]);
+  a.el('vehicle-mpg').value = '12'; a.el('fuel-price').value = '4';
+  a.click('start-trip');
+  const trip = JSON.parse(a.stored.d7TripProgress);
+  assert.equal(trip.startedAt, '2026-09-28T16:00:00.000Z');
+  assert.deepEqual(trip.addresses, ['Second', 'Start', 'End']);
+  assert.deepEqual(trip.completedAt, [null, null, null]);
+  assert.deepEqual(trip.routeSnapshot, {
+    start: 'Origin', stops: ['Second', 'Start'], destination: 'End',
+    plannedMiles: 6, plannedMinutes: 6, mpg: 12, fuelPrice: 4, fuelCost: 2,
+    legs: [
+      { from: 'Origin', to: 'Second', plannedMiles: 1, plannedMinutes: 1 },
+      { from: 'Second', to: 'Start', plannedMiles: 2, plannedMinutes: 2 },
+      { from: 'Start', to: 'End', plannedMiles: 3, plannedMinutes: 3 },
+    ],
+  });
+  a.destination('Changed'); a.el('vehicle-mpg').value = '99';
+  assert.deepEqual(JSON.parse(a.stored.d7TripProgress), trip);
+});
+
+test('arrival times survive refresh and Back replaces a completion with the latest time', () => {
+  const a = setup(); beginTrip(a); a.advance(60000); a.click('trip-next');
+  assert.equal(JSON.parse(a.stored.d7TripProgress).completedAt[0], '2026-09-28T16:01:00.000Z');
+  const b = setup([], { storage: a.stored, initialTime: Date.parse('2026-09-28T16:02:00Z') });
+  assert.equal(b.el('trip-stop-address').textContent, 'End');
+  b.click('trip-back'); b.click('trip-next'); b.advance(60000); b.click('trip-next');
+  const trip = JSON.parse(b.stored.d7TripProgress);
+  assert.deepEqual(trip.completedAt, ['2026-09-28T16:02:00.000Z', '2026-09-28T16:03:00.000Z']);
+  assert.equal(b.el('finish-trip').hidden, false);
+  b.click('finish-trip');
+  const report = JSON.parse(b.stored.d7TripReports)[0];
+  assert.equal(report.elapsedMinutes, 3);
+  assert.equal(report.incomplete, false);
+  assert.equal(report.routeSnapshot.plannedMiles, 10);
+  assert.equal(report.routeSnapshot.plannedMinutes, 85);
+  assert.equal(report.routeSnapshot.fuelCost, 3);
+  assert.equal(b.stored.d7TripProgress, undefined);
+  assert.equal(b.el('trip-panel').hidden, true);
+  assert.equal(b.el('trip-report').hidden, false);
+  assert.ok(b.el('report-summary').children.some(p => p.textContent === 'Stops completed: 2 of 2'));
+});
+
+test('early ending asks for confirmation, supports cancel, and saves an incomplete report', () => {
+  const a = setup([false, true]); beginTrip(a);
+  assert.equal(a.el('finish-trip').hidden, true);
+  a.advance(30000); a.click('trip-next'); a.click('end-trip');
+  assert.equal(a.stored.d7TripReports, undefined);
+  assert.ok(a.stored.d7TripProgress);
+  a.click('end-trip');
+  assert.equal(a.confirmationMessages[0], 'End trip early? The report will show it as incomplete.');
+  const report = JSON.parse(a.stored.d7TripReports)[0];
+  assert.equal(report.incomplete, true);
+  assert.equal(report.elapsedMinutes, 0.5);
+  assert.equal(report.completedAt.filter(Boolean).length, 1);
+  assert.equal(a.el('report-stops').children[1].textContent, 'End — Not completed');
+});
+
+test('revisiting the destination updates its arrival time before finishing', () => {
+  const a = setup(); beginTrip(a);
+  a.click('trip-next'); a.click('trip-next');
+  a.click('trip-back'); a.advance(60000); a.click('trip-next');
+  assert.equal(a.el('trip-next').disabled, false);
+  a.click('trip-next'); a.click('finish-trip');
+  assert.equal(JSON.parse(a.stored.d7TripReports)[0].completedAt[1], '2026-09-28T16:01:00.000Z');
+});
+
+test('legacy progress restores without inventing times or planned route figures', () => {
+  const storage = { d7TripProgress: JSON.stringify({ addresses: ['Legacy stop', 'Legacy destination'], index: 1 }) };
+  const a = setup([], { storage, init: false });
+  assert.equal(a.el('trip-panel').hidden, false);
+  assert.equal(a.el('trip-stop-address').textContent, 'Legacy destination');
+  a.click('trip-next'); a.click('finish-trip');
+  const report = JSON.parse(storage.d7TripReports)[0];
+  assert.equal(report.startedAt, null);
+  assert.equal(report.elapsedMinutes, null);
+  assert.equal(report.routeSnapshot.plannedMiles, null);
+  assert.equal(report.incomplete, true);
+  assert.ok(a.el('report-summary').children.some(p => p.textContent === 'Start time: Not recorded'));
+});
+
+test('driver and notes are saved safely and included in identical copy, email, and share text', async () => {
+  const copies = [], shares = [];
+  const a = setup([], { navigatorApi: {
+    clipboard: { writeText: async text => copies.push(text) },
+    share: async data => shares.push(data),
+  } });
+  finishTwoStopTrip(a);
+  const driver = 'Pat & <Lee> "Jr"';
+  const notes = 'Gate #2, north entrance\nCall + wait & confirm.';
+  a.el('driver-name').value = driver; a.el('driver-name').listeners.input();
+  a.el('report-notes').value = notes; a.el('report-notes').listeners.input();
+  await a.click('copy-report');
+  assert.equal(a.el('report-message').textContent, 'Copied!');
+  assert.match(copies[0], /Driver: Pat & <Lee> "Jr"/);
+  assert.match(copies[0], /Stops completed: 2 of 2/);
+  assert.match(copies[0], /Start address: Origin/);
+  assert.match(copies[0], /Planned route miles: 10.0/);
+  assert.match(copies[0], /Planned route drive time: 85.0 min/);
+  assert.match(copies[0], /Planned route estimated fuel cost: \$3.00/);
+  assert.ok(copies[0].endsWith('Notes: ' + notes));
+  a.click('email-report');
+  const report = JSON.parse(a.stored.d7TripReports)[0];
+  const subject = `D7 Route trip report - ${report.date} - ${driver}`;
+  assert.equal(a.context.window.location.href,
+    'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(copies[0]));
+  assert.equal(a.el('share-report').hidden, false);
+  await a.click('share-report');
+  assert.equal(shares[0].title, subject);
+  assert.equal(shares[0].text, copies[0]);
+  assert.equal(report.notes, notes);
+  assert.equal(a.stored.d7DriverName, driver);
+  assert.match(a.el('trip-reports-list').children[0].children[0].textContent, /Pat & <Lee>/);
+  const next = setup([], { storage: a.stored });
+  assert.equal(finishTwoStopTrip(next).driver, driver);
+});
+
+test('copy fallback works when clipboard is missing or rejects and Share stays hidden', async () => {
+  for (const navigatorApi of [{}, { clipboard: { writeText: async () => { throw new Error('Denied'); } } }]) {
+    const a = setup([], { navigatorApi }); finishTwoStopTrip(a);
+    assert.equal(a.el('share-report').hidden, true);
+    await a.click('copy-report');
+    assert.match(a.fallbackCopies[0], /D7 Route trip report/);
+    assert.equal(a.el('report-message').textContent, 'Copied!');
+    assert.equal(a.el('body').children.length, 0);
+  }
+});
+
+test('history lists and reopens saved reports and deletes only after confirmation', () => {
+  const a = setup(); const report = finishTwoStopTrip(a);
+  const b = setup([false, true], { storage: a.stored });
+  const row = b.el('trip-reports-list').children[0];
+  assert.ok(row.children[0].textContent.includes(report.date));
+  assert.match(row.children[0].textContent, /2 of 2 stops/);
+  row.children[0].listeners.click();
+  assert.equal(b.el('trip-report').hidden, false);
+  assert.equal(b.el('report-stops').children.length, 2);
+  row.children[1].listeners.click();
+  assert.equal(JSON.parse(b.stored.d7TripReports).length, 1);
+  row.children[1].listeners.click();
+  assert.equal(JSON.parse(b.stored.d7TripReports).length, 0);
+  assert.equal(b.el('trip-report').hidden, true);
+  assert.equal(b.el('export-reports').disabled, true);
+});
+
+test('history retains only the most recent 100 reports', () => {
+  const a = setup(); const sample = finishTwoStopTrip(a);
+  a.stored.d7TripReports = JSON.stringify(Array.from({ length: 100 }, (_, index) => ({ ...sample, id: `old-${index}` })));
+  const latest = finishTwoStopTrip(a);
+  const reports = JSON.parse(a.stored.d7TripReports);
+  assert.equal(reports.length, 100);
+  assert.equal(reports[0].id, latest.id);
+  assert.equal(reports.at(-1).id, 'old-98');
+  assert.equal(a.el('trip-reports-list').children.length, 100);
+});
+
+test('CSV download contains all reports and escapes commas, quotes, and newlines', async () => {
+  const a = setup(); finishTwoStopTrip(a);
+  a.el('driver-name').value = 'Lee, "Jr"'; a.el('driver-name').listeners.input();
+  a.el('report-notes').value = 'Line 1, "quoted"\r\nLine 2'; a.el('report-notes').listeners.input();
+  const report = JSON.parse(a.stored.d7TripReports)[0];
+  finishTwoStopTrip(a);
+  a.click('export-reports');
+  assert.deepEqual(a.downloads, [{ href: 'blob:report-test', download: 'd7-trip-reports.csv' }]);
+  const csv = await a.blobs[0].text();
+  assert.match(csv, /"elapsed minutes","stops completed","total stops"/);
+  assert.ok(csv.includes('"Lee, ""Jr"""'));
+  assert.equal(csv.split(`"${report.date}",`).length, 3);
+  assert.ok(csv.endsWith('"Line 1, ""quoted""\r\nLine 2"'));
+  assert.ok(csv.includes(`"${report.startedAt}","${report.endedAt}","0","2","2","10","85","15","4.5","3"`));
+});
+
+test('storage errors keep a trip available to retry and a saved report prevents duplicate restoration', () => {
+  const a = setup(); beginTrip(a); a.click('trip-next'); a.click('trip-next');
+  const savedProgress = a.stored.d7TripProgress;
+  const setItem = a.context.localStorage.setItem;
+  a.context.localStorage.setItem = () => { throw new Error('Full'); };
+  a.click('finish-trip');
+  assert.ok(a.stored.d7TripProgress);
+  assert.equal(a.el('trip-panel').hidden, false);
+  assert.match(a.el('report-message').textContent, /Could not save the report/);
+  a.context.localStorage.setItem = setItem;
+  a.click('finish-trip');
+  assert.equal(JSON.parse(a.stored.d7TripReports).length, 1);
+  a.stored.d7TripProgress = savedProgress;
+  const b = setup([], { storage: a.stored });
+  assert.equal(b.el('trip-panel').hidden, true);
+});
 
 test('Navigate uses encoded addresses in optimized waypoint order', () => {
   const a = setup();
