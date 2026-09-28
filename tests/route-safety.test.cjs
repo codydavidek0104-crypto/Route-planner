@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 // Run the actual page script with controlled Maps responses and a minimal DOM.
-function setup(confirmations = [], { init = true } = {}) {
+function setup(confirmations = [], { init = true, storage = {} } = {}) {
   const elements = new Map();
   function element() {
     return {
@@ -24,7 +24,8 @@ function setup(confirmations = [], { init = true } = {}) {
   el('fuel-price').value = '4.50';
   const requests = [];
   const renderers = [];
-  const stored = {};
+  const stored = storage;
+  const opened = [];
   const confirmationMessages = [];
   // Fake timers: advance(ms) runs due callbacks in order.
   let now = 0;
@@ -49,8 +50,10 @@ function setup(confirmations = [], { init = true } = {}) {
     localStorage: {
       getItem: key => stored[key] || null,
       setItem: (key, value) => { stored[key] = value; },
+      removeItem: key => { delete stored[key]; },
     },
     window: {
+      open: (url, target) => { opened.push({ url, target }); },
       confirm: message => {
         confirmationMessages.push(message);
         return confirmations.length ? confirmations.shift() : true;
@@ -87,9 +90,98 @@ function setup(confirmations = [], { init = true } = {}) {
   const savedRoutes = () => JSON.parse(stored.d7SavedRoutes || '{}');
   return {
     el, click, add, destination, requests, renderers, reply, calculate, stale,
-    savedRoutes, confirmationMessages, advance, context,
+    savedRoutes, confirmationMessages, advance, context, stored, opened,
   };
 }
+
+test('Navigate uses encoded addresses in optimized waypoint order', () => {
+  const a = setup();
+  a.destination('Final #4, CA');
+  a.add('First & Main');
+  a.add('Second / Oak');
+  a.click('optimize-route');
+  a.reply(0, 'OK', [1, 0]);
+  assert.equal(a.el('navigation-results').hidden, false);
+  assert.equal(a.el('navigation-controls').children[0].textContent, 'Navigate');
+  a.el('navigation-controls').children[0].listeners.click();
+  assert.deepEqual(a.opened[0], {
+    url: 'https://www.google.com/maps/dir/?api=1&origin=Start&destination=Final%20%234%2C%20CA&waypoints=Second%20%2F%20Oak|First%20%26%20Main&travelmode=driving',
+    target: '_blank',
+  });
+});
+
+test('20 stops split into overlapping navigation legs with at most nine waypoints', () => {
+  const a = setup();
+  for (let i = 2; i <= 20; i++) a.add(`Stop ${i}`);
+  a.calculate(); a.reply(0);
+  const buttons = a.el('navigation-controls').children;
+  assert.equal(buttons.length, 2);
+  assert.equal(buttons[0].textContent, 'Navigate leg 1 of 2');
+  assert.equal(buttons[1].textContent, 'Navigate leg 2 of 2');
+  buttons[0].listeners.click(); buttons[1].listeners.click();
+  const urls = a.opened.map(item => new URL(item.url));
+  assert.equal(urls[0].searchParams.get('waypoints').split('|').length, 9);
+  assert.equal(urls[1].searchParams.get('waypoints').split('|').length, 9);
+  assert.equal(urls[0].searchParams.get('destination'), urls[1].searchParams.get('origin'));
+  assert.equal(urls[1].searchParams.get('destination'), 'End');
+});
+
+test('Start from my location omits the origin parameter', () => {
+  const a = setup(); a.calculate(); a.reply(0);
+  a.el('start-from-location').checked = true;
+  a.el('navigation-controls').children[0].listeners.click();
+  assert.equal(new URL(a.opened[0].url).searchParams.has('origin'), false);
+});
+
+test('Start from my location omits the origin only on the first leg', () => {
+  const a = setup();
+  for (let i = 2; i <= 14; i++) a.add(`Stop ${i}`);
+  a.calculate(); a.reply(0);
+  a.el('start-from-location').checked = true;
+  const buttons = a.el('navigation-controls').children;
+  assert.equal(buttons.length, 2);
+  buttons[0].listeners.click(); buttons[1].listeners.click();
+  const urls = a.opened.map(item => new URL(item.url));
+  assert.equal(urls[0].searchParams.has('origin'), false);
+  assert.equal(urls[1].searchParams.get('origin'), urls[0].searchParams.get('destination'));
+  assert.equal(urls[1].searchParams.get('origin'), 'Stop 11');
+});
+
+test('Navigate appears only for a current successful result', () => {
+  const a = setup();
+  assert.equal(a.el('navigation-results').hidden, true);
+  a.calculate();
+  assert.equal(a.el('navigation-results').hidden, true);
+  a.reply(0);
+  assert.equal(a.el('navigation-results').hidden, false);
+  a.destination('Changed');
+  assert.equal(a.el('navigation-results').hidden, true);
+  a.calculate(); a.reply(1, 'ZERO_RESULTS');
+  assert.equal(a.el('navigation-results').hidden, true);
+});
+
+test('next-stop progress saves, restores, moves back, and ends', () => {
+  const storage = {};
+  const a = setup([], { storage });
+  a.add('Middle'); a.calculate(); a.reply(0);
+  a.click('start-trip');
+  assert.equal(a.el('trip-stop-number').textContent, 'Stop 1 of 2');
+  assert.equal(a.el('trip-stop-address').textContent, 'Middle');
+  a.click('navigate-stop');
+  assert.equal(new URL(a.opened[0].url).searchParams.get('destination'), 'Middle');
+  assert.equal(new URL(a.opened[0].url).searchParams.has('origin'), false);
+  a.click('trip-next');
+  assert.equal(JSON.parse(storage.d7TripProgress).index, 1);
+  const restored = setup([], { storage });
+  assert.equal(restored.el('trip-panel').hidden, false);
+  assert.equal(restored.el('trip-stop-address').textContent, 'End');
+  restored.click('trip-back');
+  assert.equal(JSON.parse(storage.d7TripProgress).index, 0);
+  restored.click('end-trip');
+  assert.equal(restored.el('trip-panel').hidden, true);
+  assert.equal(storage.d7TripProgress, undefined);
+  assert.equal(storage.d7SavedRoutes, undefined);
+});
 
 test('calculation preserves distance, duration and fuel; destination edits clear results', () => {
   const a = setup(); a.calculate(); a.reply(0);
