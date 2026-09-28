@@ -386,6 +386,7 @@
 
     .location-option {
       display: flex;
+      min-height: 44px;
       align-items: center;
       gap: 10px;
       margin: 14px 0 0;
@@ -696,7 +697,7 @@
 
     function mapsUrl(destination, origin, waypoints = []) {
       const parameters = ["api=1"];
-      if (origin && !startFromLocation.checked) {
+      if (origin) {
         parameters.push("origin=" + encodeURIComponent(origin));
       }
       parameters.push("destination=" + encodeURIComponent(destination));
@@ -721,7 +722,7 @@
         button.textContent = legs.length === 1 ? "Navigate" :
           `Navigate leg ${index + 1} of ${legs.length}`;
         button.addEventListener("click", () => {
-          window.open(mapsUrl(leg[leg.length - 1], leg[0], leg.slice(1, -1)), "_blank");
+          window.open(mapsUrl(leg[leg.length - 1], index === 0 && startFromLocation.checked ? null : leg[0], leg.slice(1, -1)), "_blank");
         });
         navigationControls.appendChild(button);
       });

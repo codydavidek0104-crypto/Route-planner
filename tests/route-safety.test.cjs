@@ -133,6 +133,20 @@ test('Start from my location omits the origin parameter', () => {
   assert.equal(new URL(a.opened[0].url).searchParams.has('origin'), false);
 });
 
+test('Start from my location omits the origin only on the first leg', () => {
+  const a = setup();
+  for (let i = 2; i <= 14; i++) a.add(`Stop ${i}`);
+  a.calculate(); a.reply(0);
+  a.el('start-from-location').checked = true;
+  const buttons = a.el('navigation-controls').children;
+  assert.equal(buttons.length, 2);
+  buttons[0].listeners.click(); buttons[1].listeners.click();
+  const urls = a.opened.map(item => new URL(item.url));
+  assert.equal(urls[0].searchParams.has('origin'), false);
+  assert.equal(urls[1].searchParams.get('origin'), urls[0].searchParams.get('destination'));
+  assert.equal(urls[1].searchParams.get('origin'), 'Stop 11');
+});
+
 test('Navigate appears only for a current successful result', () => {
   const a = setup();
   assert.equal(a.el('navigation-results').hidden, true);
