@@ -155,6 +155,9 @@
         background 0.15s ease;
     }
 
+    /* Google Maps draws its own controls; keep the 44px rule off them. */
+    #map button { min-height: 0; }
+
     button:hover {
       transform: translateY(-1px);
     }
@@ -781,6 +784,8 @@
     const TRIP_PROGRESS_KEY = "d7TripProgress";
     const TRIP_REPORTS_KEY = "d7TripReports";
     const DRIVER_NAME_KEY = "d7DriverName";
+    // Legacy progress has no times; stops before its index were already passed.
+    const COMPLETED_UNRECORDED = "completed-time-not-recorded";
     const routeStaleWarning = document.getElementById("route-stale-warning");
     const navigationResults = document.getElementById("navigation-results");
     const navigationControls = document.getElementById("navigation-controls");
@@ -875,7 +880,7 @@
         completedAt: navigationPoints.slice(1).map(() => null),
         routeSnapshot: {
           ...JSON.parse(JSON.stringify(routePlan)), mpg, fuelPrice,
-          fuelCost: mpg && fuelPrice ? routePlan.plannedMiles / mpg * fuelPrice : null
+          fuelCost: mpg && fuelPrice ? Number(routePlan.plannedMiles.toFixed(1)) / mpg * fuelPrice : null
         }
       };
       saveTrip();
@@ -954,7 +959,8 @@
     }
 
     function stopsCompleted(report) {
-      return report.addresses.filter((_, index) => validTime(report.completedAt[index])).length;
+      return report.addresses.filter((_, index) => validTime(report.completedAt[index]) ||
+        report.completedAt[index] === COMPLETED_UNRECORDED).length;
     }
 
     function finishTrip() {
@@ -1003,7 +1009,8 @@
 
     function reportStopText(report, index) {
       const completed = report.completedAt[index];
-      return `${report.addresses[index]} — ${validTime(completed) ? timestampText(completed) : "Not completed"}`;
+      return `${report.addresses[index]} — ${validTime(completed) ? timestampText(completed) :
+        completed === COMPLETED_UNRECORDED ? "Completed (time not recorded)" : "Not completed"}`;
     }
 
     function reportPlainText(report) {
@@ -1182,7 +1189,9 @@
           ...savedTrip,
           id: typeof savedTrip.id === "string" && savedTrip.id ? savedTrip.id : newReportId(),
           startedAt: validTime(savedTrip.startedAt) ? savedTrip.startedAt : null,
-          completedAt: savedTrip.addresses.map((_, index) => validTime(savedTrip.completedAt?.[index]) ? savedTrip.completedAt[index] : null),
+          completedAt: savedTrip.addresses.map((_, index) => validTime(savedTrip.completedAt?.[index]) ? savedTrip.completedAt[index] :
+            savedTrip.completedAt?.[index] === COMPLETED_UNRECORDED ||
+            (!Array.isArray(savedTrip.completedAt) && index < savedTrip.index) ? COMPLETED_UNRECORDED : null),
           routeSnapshot: {
             start: null, stops: savedTrip.addresses.slice(0, -1), destination: savedTrip.addresses[savedTrip.addresses.length - 1],
             plannedMiles: null, plannedMinutes: null, mpg: null, fuelPrice: null, fuelCost: null, legs: [],

@@ -237,7 +237,10 @@ test('legacy progress restores without inventing times or planned route figures'
   assert.equal(report.startedAt, null);
   assert.equal(report.elapsedMinutes, null);
   assert.equal(report.routeSnapshot.plannedMiles, null);
-  assert.equal(report.incomplete, true);
+  // The driver had already passed the first stop; its time was never recorded.
+  assert.equal(report.incomplete, false);
+  assert.equal(a.el('report-stops').children[0].textContent, 'Legacy stop — Completed (time not recorded)');
+  assert.ok(a.el('report-summary').children.some(p => p.textContent === 'Stops completed: 2 of 2'));
   assert.ok(a.el('report-summary').children.some(p => p.textContent === 'Start time: Not recorded'));
 });
 
@@ -347,6 +350,16 @@ test('storage errors keep a trip available to retry and a saved report prevents 
   a.stored.d7TripProgress = savedProgress;
   const b = setup([], { storage: a.stored });
   assert.equal(b.el('trip-panel').hidden, true);
+});
+
+test('snapshot fuel cost matches the displayed estimate; Maps controls keep their own size', () => {
+  const a = setup(); a.calculate();
+  a.reply(0, 'OK', [], [{ distance: { value: 27951.8 }, duration: { value: 1901 } }]);
+  assert.match(a.el('route-message').textContent, /17.4 miles .* Est. fuel: \$5.22/);
+  a.click('start-trip');
+  assert.equal(JSON.parse(a.stored.d7TripProgress).routeSnapshot.fuelCost.toFixed(2), '5.22');
+  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /#map button \{ min-height: 0; \}/);
 });
 
 test('Navigate uses encoded addresses in optimized waypoint order', () => {
