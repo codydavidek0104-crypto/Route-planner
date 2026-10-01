@@ -3,709 +3,1051 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>D7 Route | D7 Marketing</title>
   <meta
     name="description"
-    content="D7 Route - Plan smarter routes, save time, and reduce fuel costs."
+    content="D7 Route by D7 Marketing. Plan, optimize, and navigate delivery routes with miles, time, and fuel estimates."
   >
-
-  <title>D7 Route</title>
+  <meta name="theme-color" content="#07080a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="D7 Route">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 
   <style>
-    * {
-      box-sizing: border-box;
-    }
-
-    :root {
-      --black: #111111;
-      --dark-gray: #292929;
-      --gray: #6b6b6b;
-      --light-gray: #eeeeee;
-      --background: #f5f5f5;
-      --white: #ffffff;
-      --red: #c9202f;
-      --dark-red: #a31824;
-    }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: Arial, Helvetica, sans-serif;
-      background: linear-gradient(rgba(18, 18, 18, 0.62), rgba(18, 18, 18, 0.62)), url("d7-forest-road-background.jpg") center / cover fixed;
-      color: var(--black);
-    }
-
-    .top-bar {
-      height: 7px;
-      background: var(--red);
-    }
-
-    .app {
-      width: min(100% - 32px, 720px);
-      margin: 0 auto;
-      padding: 40px 0 60px;
-    }
-
-    .header {
-      margin-bottom: 28px;
-      text-align: center;
-    }
-
-    .brand {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      margin-bottom: 8px;
-    }
-
-    .logo-mark {
-      display: grid;
-      place-items: center;
-      width: 52px;
-      height: 52px;
-      border-radius: 12px;
-      background: var(--red);
-      color: var(--white);
-      font-size: 21px;
-      font-weight: 800;
-      box-shadow: 0 6px 16px rgba(201, 32, 47, 0.2);
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 38px;
-      line-height: 1;
-      letter-spacing: -1px;
-      color: var(--black);
-    }
-
-    .subtitle {
-      margin: 10px 0 0;
-      color: var(--gray);
-      font-size: 16px;
-    }
-
-    .card {
-      padding: 28px;
-      border: 1px solid #dddddd;
-      border-radius: 16px;
-      background: var(--white);
-      box-shadow: 0 12px 35px rgba(0, 0, 0, 0.08);
-    }
-
-    .section-title {
-      margin: 0 0 6px;
-      font-size: 20px;
-      color: var(--black);
-    }
-
-    .section-description {
-      margin: 0 0 22px;
-      color: var(--gray);
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
-    label {
-      display: block;
-      margin-bottom: 8px;
-      color: var(--dark-gray);
-      font-size: 14px;
-      font-weight: 700;
-    }
-
-    .input-row {
-      display: flex;
-      gap: 10px;
-    }
-
-    input {
-      width: 100%;
-      min-width: 0;
-      padding: 14px 15px;
-      border: 1px solid #cfcfcf;
-      border-radius: 9px;
-      background: var(--white);
-      color: var(--black);
-      font-size: 16px;
-      outline: none;
-      transition:
-        border-color 0.15s ease,
-        box-shadow 0.15s ease;
-    }
-
-    input:focus {
-      border-color: var(--red);
-      box-shadow: 0 0 0 3px rgba(201, 32, 47, 0.12);
-    }
-
-    input::placeholder {
-      color: #999999;
-    }
-
-    button {
-      min-height: 44px;
-      border: 0;
-      border-radius: 9px;
-      font-size: 15px;
-      font-weight: 700;
-      cursor: pointer;
-      transition:
-        transform 0.15s ease,
-        background 0.15s ease;
-    }
-
-    /* Google Maps draws its own controls; keep the 44px rule off them. */
-    #map button { min-height: 0; }
-
-    button:hover {
-      transform: translateY(-1px);
-    }
-
-    button:disabled {
-      cursor: not-allowed;
-      opacity: 0.5;
-      transform: none;
-    }
-
-    .add-button {
-      flex: 0 0 auto;
-      padding: 0 20px;
-      background: var(--black);
-      color: var(--white);
-    }
-
-    .add-button:hover {
-      background: var(--dark-gray);
-    }
-
-    .stop-counter {
-      margin: 10px 0 0;
-      color: var(--gray);
-      font-size: 13px;
-    }
-
-    .stops-container {
-      display: grid;
-      gap: 9px;
-      margin-top: 18px;
-    }
-
-    .stop-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 14px;
-      border: 1px solid #e1e1e1;
-      border-radius: 9px;
-      background: #fafafa;
-    }
-
-    .stop-number {
-      display: grid;
-      flex: 0 0 auto;
-      place-items: center;
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      background: var(--dark-gray);
-      color: var(--white);
-      font-size: 13px;
-      font-weight: 700;
-    }
-
-    .stop-address {
-      flex: 1;
-      min-width: 0;
-      overflow-wrap: anywhere;
-      color: var(--dark-gray);
-      font-size: 14px;
-    }
-
-    .stop-item input.stop-address {
-      /* Let flex size the field; an input's intrinsic width overflows phones. */
-      width: 0;
-      padding: 8px 10px;
-      border-color: transparent;
-      background: transparent;
-    }
-
-    .stop-item input.stop-address:hover,
-    .stop-item input.stop-address:focus {
-      border-color: #cfcfcf;
-      background: var(--white);
-    }
-
-    .remove-button {
-      flex: 0 0 auto;
-      padding: 7px 10px;
-      background: transparent;
-      color: var(--red);
-      font-size: 13px;
-    }
-
-    .remove-button:hover {
-      background: #fff0f1;
-    }
-
-    .divider {
-      height: 1px;
-      margin: 26px 0;
-      background: var(--light-gray);
-    }
-
-    .destination-wrapper,
-    .start-wrapper {
-      position: relative;
-    }
-
-    .start-wrapper {
-      margin-bottom: 22px;
-    }
-
-    .destination-label-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .destination-badge {
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: #fff0f1;
-      color: var(--red);
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .fuel-settings {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 22px;
-    }
-
-    .saved-routes {
-      margin-top: 22px;
-      padding: 18px;
-      border: 1px solid #e1e1e1;
-      border-radius: 12px;
-      background: #fafafa;
-    }
-
-    .saved-routes-title {
-      margin: 0 0 14px;
-      font-size: 16px;
-    }
-
-    .save-row {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-
-    .save-row:last-child {
-      margin-bottom: 0;
-    }
-
-    .saved-routes select {
-      width: 100%;
-      min-width: 0;
-      padding: 14px 15px;
-      border: 1px solid #cfcfcf;
-      border-radius: 9px;
-      background: var(--white);
-      color: var(--black);
-      font-size: 16px;
-    }
-
-    .saved-route-button {
-      flex: 0 0 auto;
-      min-width: 110px;
-      padding: 0 16px;
-      border: 1px solid var(--black);
-      background: var(--white);
-      color: var(--black);
-    }
-
-    .delete-route-button {
-      border-color: var(--red);
-      color: var(--red);
-    }
-
-    .delete-route-button:hover {
-      background: #fff0f1;
-    }
-
-    .actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 26px;
-    }
-
-    .action-button {
-      min-height: 50px;
-      padding: 13px 18px;
-    }
-
-    #map {
-      width: 100%;
-      height: 400px;
-      margin-top: 24px;
-      border-radius: 18px;
-      overflow: hidden;
-      background: #d9d9d9;
-    }
-
-    .optimize-button {
-      border: 1px solid var(--black);
-      background: var(--white);
-      color: var(--black);
-    }
-
-    .optimize-button:hover {
-      background: var(--light-gray);
-    }
-
-    .calculate-button {
-      background: var(--red);
-      color: var(--white);
-    }
-
-    .calculate-button:hover {
-      background: var(--dark-red);
-    }
-
-    .route-message {
-      min-height: 22px;
-      margin: 18px 0 0;
-      color: var(--dark-gray);
-      font-size: 14px;
-      font-weight: 700;
-      text-align: center;
-    }
-
-    .navigation-controls, .trip-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 14px;
-    }
-
-    .navigation-controls button, .trip-actions button {
-      min-height: 48px;
-      padding: 12px 16px;
-      background: var(--red);
-      color: var(--white);
-    }
-
-    .navigation-controls button:hover, .trip-actions button:hover {
-      background: var(--dark-red);
-    }
-
-    .location-option {
-      display: flex;
-      min-height: 44px;
-      align-items: center;
-      gap: 10px;
-      margin: 14px 0 0;
-    }
-
-    .location-option input {
-      width: 20px;
-      height: 20px;
-      flex: 0 0 auto;
-    }
-
-    .trip-panel {
-      margin-top: 18px;
-      padding: 18px;
-      border: 1px solid #e1e1e1;
-      border-radius: 12px;
-      background: #fafafa;
-    }
-
-    .trip-panel p { margin: 0 0 8px; overflow-wrap: anywhere; }
-
-    .report-panel, .report-history {
-      margin-top: 22px;
-      padding: 18px;
-      border: 1px solid #e1e1e1;
-      border-radius: 12px;
-      background: #fafafa;
-      overflow-wrap: anywhere;
-    }
-
-    .report-panel h2, .report-history h2 { margin: 0 0 14px; font-size: 20px; }
-    .report-panel h3 { margin: 18px 0 10px; font-size: 16px; }
-    .report-panel p, .report-history p { line-height: 1.5; }
-    #report-stops { padding-left: 24px; }
-    #report-stops li { margin-bottom: 12px; line-height: 1.5; }
-    #report-notes {
-      width: 100%;
-      min-height: 100px;
-      padding: 12px;
-      border: 1px solid #cfcfcf;
-      border-radius: 9px;
-      font: inherit;
-      font-size: 16px;
-      resize: vertical;
-    }
-    .report-entry { display: flex; gap: 10px; margin-top: 12px; }
-    .report-entry button { padding: 12px; overflow-wrap: anywhere; }
-    .report-entry button:first-child { flex: 1; min-width: 0; text-align: left; }
-    #report-message { min-height: 22px; }
-
-    .footer-note {
-      margin: 18px 0 0;
-      color: #888888;
-      font-size: 12px;
-      text-align: center;
-    }
-
-    @media (max-width: 600px) {
-      .app {
-        width: min(100% - 22px, 720px);
-        padding-top: 28px;
-      }
-
-      .card {
-        padding: 20px;
-      }
-
-      h1 {
-        font-size: 32px;
-      }
-
-      .input-row {
-        flex-direction: column;
-      }
-
-      .save-row, .report-entry { flex-direction: column; }
-      .fuel-settings { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-      .navigation-controls button, .trip-actions button { flex: 1 1 140px; }
-
-      .add-button {
-        min-height: 48px;
-        width: 100%;
-      }
-
-      .actions {
-        grid-template-columns: 1fr;
-      }
-    }
+/*
+  Brand tokens
+  ------------
+  Change the D7 Marketing palette here. Everything below references these
+  variables. The header monogram uses currentColor, so it follows --red.
+  Raster icons are generated from icons/mark.svg (same paths, fill baked in).
+  After editing the mark, regenerate them with:
+    node scripts/generate-icons.mjs
+*/
+:root {
+  --bg: #07080a;
+  --bg-deep: #040506;
+  --panel: #101216;
+  --panel-raised: #171b20;
+  --inset: #0b0c0e;
+  --line: #2c3138;
+  --line-strong: #5a626c;
+  --metal: #9aa3af;
+  --red: #e10600;
+  --red-deep: #b10500;
+  --red-hot: #ff4d4d;
+  --text: #f4f5f7;
+  --text-dim: #c5cad3;
+  --text-faint: #9aa3af;
+  --ok: #3dd68c;
+  --warn: #ffb020;
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+  font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { color-scheme: dark; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+  background:
+    radial-gradient(900px 320px at 70% -10%, color-mix(in srgb, var(--red) 22%, transparent), transparent 60%),
+    var(--bg-deep);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--red) 45%, transparent);
+  color: var(--text);
+}
+
+[hidden] { display: none !important; }
+
+button { min-height: 44px; }
+
+/* Google Maps draws its own controls; keep the 44px rule off them. */
+#map button { min-height: 0; }
+
+.frame-glow {
+  width: min(1240px, calc(100% - 16px));
+  margin: 14px auto 28px;
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--red) 28%, transparent));
+}
+
+.shell {
+  padding: 16px;
+  color: var(--text);
+  background:
+    linear-gradient(var(--red), var(--red)) left 14px top 0 / 26px 2px no-repeat,
+    linear-gradient(var(--red), var(--red)) left 0 top 14px / 2px 26px no-repeat,
+    linear-gradient(var(--red), var(--red)) right 14px top 0 / 26px 2px no-repeat,
+    linear-gradient(var(--red), var(--red)) right 0 top 14px / 2px 26px no-repeat,
+    linear-gradient(var(--red), var(--red)) left 14px bottom 0 / 26px 2px no-repeat,
+    linear-gradient(var(--red), var(--red)) left 0 bottom 14px / 2px 26px no-repeat,
+    linear-gradient(var(--red), var(--red)) right 14px bottom 0 / 26px 2px no-repeat,
+    linear-gradient(var(--red), var(--red)) right 0 bottom 14px / 2px 26px no-repeat,
+    linear-gradient(180deg, #14181d 0%, #0c0e12 120px);
+  border: 1px solid var(--line-strong);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 0 40px rgba(0, 0, 0, 0.35);
+  clip-path: polygon(
+    16px 0, calc(100% - 16px) 0, 100% 16px,
+    100% calc(100% - 16px), calc(100% - 16px) 100%, 16px 100%,
+    0 calc(100% - 16px), 0 16px
+  );
+}
+
+.console-header {
+  margin-bottom: 14px;
+  padding: 6px 8px 12px;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.logo-mark {
+  display: block;
+  width: 58px;
+  height: 46px;
+  flex: 0 0 auto;
+  color: var(--red);
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--red) 55%, transparent));
+}
+
+.brand-text { min-width: 0; }
+
+h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.brand-sub {
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 0;
+  color: var(--red-hot);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.status-line::before {
+  content: "";
+  width: 28px;
+  height: 2px;
+  flex: 0 0 auto;
+  background: var(--red);
+  box-shadow: 0 0 8px var(--red);
+}
+
+.status-line::after {
+  content: "";
+  height: 1px;
+  flex: 1 1 auto;
+  background: linear-gradient(90deg, var(--red), transparent 80%);
+}
+
+.workspace { min-width: 0; }
+
+.panel {
+  position: relative;
+  min-width: 0;
+  margin-bottom: 12px;
+  padding: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 36px),
+    var(--panel);
+  border: 1px solid var(--line);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+
+.panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 36%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--red), transparent);
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.tick {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  background: var(--red);
+  box-shadow: 0 0 8px var(--red);
+}
+
+.section-description,
+.hint,
+.footer-note {
+  margin: 0 0 14px;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: none;
+}
+
+.field { margin-bottom: 14px; }
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.panel input:not([type="checkbox"]),
+.panel select,
+.panel textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--inset);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  outline: none;
+}
+
+.panel textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.panel input::placeholder,
+.panel textarea::placeholder { color: var(--text-faint); }
+
+.panel input:not([type="checkbox"]):focus,
+.panel select:focus,
+.panel textarea:focus,
+.affix-field:focus-within {
+  border-color: var(--red);
+  box-shadow:
+    0 0 0 1px var(--red),
+    0 0 14px color-mix(in srgb, var(--red) 40%, transparent);
+}
+
+.affix-field {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--inset);
+  color: var(--text-dim);
+}
+
+.affix-field span,
+.affix-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  color: var(--red-hot);
+}
+
+.affix-field input {
+  flex: 1 1 auto;
+  width: auto;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.affix-field input:focus { box-shadow: none; }
+
+.affix-suffix {
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.input-row input { flex: 1 1 auto; min-width: 0; }
+
+.stop-counter {
+  margin: 8px 0 0;
+  color: var(--text-faint);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.stops-container {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.stop-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  background: var(--inset);
+}
+
+.stop-number {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  background: var(--red);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.stop-address { overflow-wrap: anywhere; }
+
+.stop-item input.stop-address {
+  width: 0;
+  flex: 1 1 auto;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.stop-item input.stop-address:hover,
+.stop-item input.stop-address:focus {
+  border-color: var(--line-strong);
+  background: var(--bg);
+}
+
+.divider {
+  height: 1px;
+  margin: 16px 0;
+  background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+}
+
+.fuel-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.save-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+button.btn,
+.navigation-controls button,
+.trip-actions button,
+.report-entry button,
+.remove-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--panel-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-align: center;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+button.btn svg,
+.navigation-controls button svg,
+.trip-actions button svg { flex: 0 0 auto; }
+
+button.btn.action-button,
+button#start-trip { width: 100%; min-height: 48px; }
+
+button.btn.add-button,
+button.btn.optimize-button,
+button#start-trip,
+button#finish-trip {
+  border-color: var(--red);
+  background: var(--red);
+  color: #fff;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--red) 38%, transparent);
+}
+
+button.btn.calculate-button,
+button#navigate-stop,
+button#trip-next,
+button#trip-back,
+button#copy-report,
+button#email-report,
+button#share-report,
+button#export-reports,
+button#load-route,
+button#save-route {
+  background: transparent;
+  color: var(--text);
+}
+
+button.btn.optimize-button:hover,
+button.btn.add-button:hover,
+button#start-trip:hover,
+button#finish-trip:hover { background: var(--red-deep); }
+
+button.btn.calculate-button:hover,
+button#navigate-stop:hover,
+button#trip-next:hover,
+button#trip-back:hover,
+button#load-route:hover,
+button#save-route:hover,
+button#copy-report:hover,
+button#email-report:hover,
+button#share-report:hover,
+button#export-reports:hover {
+  border-color: var(--metal);
+  background: #1c2128;
+}
+
+button.remove-button,
+button#delete-route,
+button#end-trip,
+.report-entry button:last-child {
+  border-color: color-mix(in srgb, var(--red-hot) 70%, transparent);
+  background: transparent;
+  color: var(--red-hot);
+}
+
+.remove-button { flex: 0 0 auto; min-width: 44px; padding: 0 12px; }
+
+.remove-button:hover,
+#delete-route:hover,
+#end-trip:hover,
+.report-entry button:last-child:hover {
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+}
+
+.shell button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.shell button:focus-visible,
+.shell input:focus-visible,
+.shell select:focus-visible,
+.shell textarea:focus-visible {
+  outline: 2px solid var(--red-hot);
+  outline-offset: 2px;
+}
+
+#map :focus-visible { outline: revert; }
+
+#map {
+  width: 100%;
+  height: 320px;
+  border: 1px solid var(--line);
+  background: #121418;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.stat {
+  min-width: 0;
+  min-height: 84px;
+  padding: 10px 12px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.stat-label {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.stat-readout {
+  margin: 8px 0 0;
+  color: var(--text);
+  font-size: clamp(16px, 4.4vw, 28px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.stat-unit {
+  margin-left: 4px;
+  color: var(--text-dim);
+  font-size: 0.55em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.route-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--inset);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.route-message:empty { display: none; }
+
+.route-message.is-ok {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+}
+
+.route-message.is-error {
+  color: #ffd4d4;
+  border-color: color-mix(in srgb, var(--red-hot) 75%, transparent);
+  background: color-mix(in srgb, var(--red) 14%, var(--inset));
+}
+
+.route-message.is-busy {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--red-hot) 55%, transparent);
+}
+
+.route-message.is-busy::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--red-hot);
+  box-shadow: 0 0 8px var(--red-hot);
+  animation: d7-pulse 1s ease-in-out infinite;
+}
+
+.route-message.is-warn,
+#route-stale-warning {
+  color: #ffe2b0;
+  border-color: color-mix(in srgb, var(--warn) 75%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, var(--inset));
+}
+
+.trip-idle {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.panel:has(#navigation-results:not([hidden])) .trip-idle,
+.panel:has(#trip-panel:not([hidden])) .trip-idle,
+.panel:has(#route-message:not(:empty)) .trip-idle,
+.panel:has(#route-stale-warning:not([hidden])) .trip-idle { display: none; }
+
+.location-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.location-option input {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--red);
+}
+
+.navigation-controls,
+.trip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.navigation-controls button,
+.trip-actions button {
+  flex: 1 1 calc(50% - 8px);
+  min-width: 0;
+}
+
+#start-trip { flex-basis: 100%; }
+
+#trip-stop-number {
+  margin: 0;
+  color: var(--red-hot);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+#trip-stop-address {
+  margin: 6px 0 4px;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.trip-panel { margin-top: 8px; }
+
+.report-panel h2,
+.report-history h2 { margin: 0 0 12px; }
+
+.report-panel h3 {
+  margin: 16px 0 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+#report-status {
+  margin: 0 0 12px;
+  color: var(--red-hot);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+#report-summary p,
+.report-history > p,
+.report-panel > p {
+  margin: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+#report-stops {
+  margin: 0;
+  padding-left: 22px;
+}
+
+#report-stops li {
+  margin: 0 0 8px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.report-entry {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.report-entry button:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.report-message,
+.history-message {
+  min-height: 22px;
+  margin: 8px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.report-message:empty,
+.history-message:empty { min-height: 0; margin: 0; }
+
+.report-message.is-ok,
+.history-message.is-ok { color: var(--ok); }
+
+.report-message.is-error,
+.history-message.is-error { color: var(--red-hot); }
+
+.footer-note {
+  margin: 4px 0 0;
+  color: var(--text-faint);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.pac-container {
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  font-family: inherit;
+}
+
+.pac-item {
+  min-height: 44px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  color: var(--text);
+  line-height: 28px;
+}
+
+.pac-item-query { color: var(--text); font-size: 15px; }
+
+.pac-matched { color: var(--red-hot); }
+
+@keyframes d7-pulse {
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-message.is-busy::before { animation: none; }
+}
+
+@media (min-width: 960px) {
+  .shell { padding: 18px; }
+
+  h1 { font-size: 32px; }
+
+  .brand-sub {
+    font-size: 12px;
+    letter-spacing: 0.16em;
+  }
+
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+  }
+
+  #map { height: 520px; }
+
+  .stat-readout { font-size: 28px; }
+}
+
+@media (max-width: 420px) {
+  .frame-glow { width: calc(100% - 10px); margin-top: 8px; }
+  .shell { padding: 12px; }
+  .panel { padding: 12px; }
+  h1 { font-size: 22px; letter-spacing: 0.08em; }
+  .logo-mark { width: 48px; height: 38px; }
+}
   </style>
 </head>
 
 <body>
-  <div class="top-bar"></div>
+  <div class="frame-glow">
+    <div class="shell">
+      <header class="console-header">
+        <div class="brand">
+          <svg class="logo-mark" viewBox="0 0 80 64" aria-hidden="true">
+            <path fill="currentColor" fill-rule="evenodd" d="M6 6H20C44 6 50 18 50 32C50 46 44 58 20 58H6ZM18 18H22C34 18 36 24 36 32C36 40 34 46 22 46H18Z"/>
+            <path fill="currentColor" d="M56 6H76V15H68L54 58H44L58 15H56Z"/>
+          </svg>
+          <div class="brand-text">
+            <h1>D7 Route</h1>
+            <p class="brand-sub">Route Operations · D7 Marketing</p>
+          </div>
+        </div>
+        <p class="status-line" aria-hidden="true">System status: Operational</p>
+      </header>
 
-  <main class="app">
-    <header class="header">
-      <div class="brand">
-        <div class="logo-mark">D7</div>
-        <h1>D7 Route</h1>
+      <div class="workspace">
+        <div class="col-main">
+          <section class="panel" aria-labelledby="route-heading">
+            <h2 id="route-heading" class="panel-title"><span class="tick" aria-hidden="true"></span>Route</h2>
+            <p class="section-description">Enter a start, add up to 20 stops between the start and destination, then enter your final destination.</p>
+
+            <div class="field">
+              <label for="start">Start</label>
+              <div class="affix-field">
+                <span class="affix-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 21s7-7.2 7-11a7 7 0 1 0-14 0c0 3.8 7 11 7 11z"/>
+                    <circle cx="12" cy="10" r="2.2" fill="currentColor" stroke="none"/>
+                  </svg>
+                </span>
+                <input id="start" type="text" placeholder="Enter starting address" autocomplete="off">
+              </div>
+              <p class="stop-counter">Starting point. Optimize will not reorder this address.</p>
+            </div>
+
+            <label for="stop-input">Add a stop</label>
+            <div class="input-row">
+              <input id="stop-input" type="text" placeholder="Enter an address" autocomplete="off">
+              <button id="add-stop" class="btn add-button" type="button">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+                Add Stop
+              </button>
+            </div>
+            <p id="stop-counter" class="stop-counter" aria-live="polite">0 of 20 stops between start and destination</p>
+            <div id="stops-container" class="stops-container" aria-live="polite"></div>
+
+            <div class="divider"></div>
+
+            <div class="field">
+              <label for="destination">Destination</label>
+              <div class="affix-field">
+                <span class="affix-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+                    <path d="M6 21V4"/>
+                    <path d="M6 4h11l-2.5 4L17 12H6"/>
+                  </svg>
+                </span>
+                <input id="destination" type="text" placeholder="Enter final destination" autocomplete="off">
+              </div>
+            </div>
+
+            <div class="actions">
+              <button id="optimize-route" class="btn action-button optimize-button" type="button">Optimize Route</button>
+              <button id="calculate-route" class="btn action-button calculate-button" type="button">Calculate Route</button>
+            </div>
+          </section>
+
+          <section class="panel" aria-labelledby="vehicle-heading">
+            <h2 id="vehicle-heading" class="panel-title"><span class="tick" aria-hidden="true"></span>Vehicle</h2>
+            <div class="fuel-settings">
+              <div>
+                <label for="vehicle-mpg">MPG</label>
+                <input id="vehicle-mpg" type="number" min="1" step="0.1" value="15">
+              </div>
+              <div>
+                <label for="fuel-price">Fuel price</label>
+                <div class="affix-field">
+                  <span aria-hidden="true">$</span>
+                  <input id="fuel-price" type="number" min="0.01" step="0.01" value="4.50">
+                  <span class="affix-suffix" aria-hidden="true">/gal</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel" aria-labelledby="saved-heading">
+            <h2 id="saved-heading" class="panel-title"><span class="tick" aria-hidden="true"></span>Saved routes</h2>
+            <div class="field">
+              <label for="route-name">Route name</label>
+              <input id="route-name" type="text" placeholder="Example: Monday deliveries">
+            </div>
+            <label for="saved-route-select">Load a saved route</label>
+            <select id="saved-route-select">
+              <option value="">No saved routes</option>
+            </select>
+            <div class="save-actions">
+              <button id="save-route" class="btn saved-route-button" type="button" aria-label="Save route">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M5 4h11l3 3v13H5z"/>
+                  <path d="M8 4v6h8V4M8 20v-6h8v6"/>
+                </svg>
+                Save
+              </button>
+              <button id="load-route" class="btn saved-route-button" type="button" aria-label="Load route">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path d="M12 4v10"/>
+                  <path d="M8 10l4 4 4-4"/>
+                  <path d="M5 20h14"/>
+                </svg>
+                Load
+              </button>
+              <button id="delete-route" class="btn saved-route-button delete-route-button" type="button" aria-label="Delete route">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path d="M4 7h16"/>
+                  <path d="M9 7V5h6v2"/>
+                  <path d="M8 7l1 13h6l1-13"/>
+                </svg>
+                Delete
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <div class="col-side">
+          <section class="panel map-panel" aria-labelledby="map-heading">
+            <h2 id="map-heading" class="panel-title"><span class="tick" aria-hidden="true"></span>Map</h2>
+            <div id="map"></div>
+          </section>
+
+          <div class="stat-grid" role="group" aria-label="Route totals">
+            <div class="stat">
+              <p class="stat-label">Distance</p>
+              <p class="stat-readout"><span id="stat-miles">—</span><span class="stat-unit" id="stat-miles-unit"></span></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Duration</p>
+              <p class="stat-readout"><span id="stat-duration">—</span></p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Est. fuel</p>
+              <p class="stat-readout"><span id="stat-fuel">—</span></p>
+            </div>
+          </div>
+
+          <section class="panel" aria-labelledby="trip-heading">
+            <h2 id="trip-heading" class="panel-title"><span class="tick" aria-hidden="true"></span>Trip</h2>
+            <p id="route-message" class="route-message" aria-live="polite"></p>
+            <p id="route-stale-warning" class="route-message is-warn" role="status" hidden>
+              Addresses changed. Results are out of date. Calculate or Optimize Route again.
+            </p>
+            <p class="trip-idle">Calculate or optimize a route to enable navigation.</p>
+            <div id="navigation-results" hidden>
+              <label class="location-option" for="start-from-location">
+                <input id="start-from-location" type="checkbox">
+                Start from my location
+              </label>
+              <div id="navigation-controls" class="navigation-controls"></div>
+              <div class="navigation-controls">
+                <button id="start-trip" class="btn" type="button">Start trip</button>
+              </div>
+            </div>
+            <section id="trip-panel" class="trip-panel" aria-live="polite" hidden>
+              <p id="trip-stop-number"></p>
+              <p id="trip-stop-address"></p>
+              <div class="trip-actions">
+                <button id="navigate-stop" type="button">Navigate to this stop</button>
+                <button id="trip-next" type="button">Arrived / Next</button>
+                <button id="trip-back" type="button">Back</button>
+                <button id="finish-trip" type="button" hidden>Finish trip</button>
+                <button id="end-trip" type="button">End trip</button>
+              </div>
+            </section>
+          </section>
+        </div>
       </div>
 
-      <p class="subtitle">
-        Plan smarter routes. Save time and fuel.
-      </p>
-    </header>
-
-    <section class="card">
-      <h2 class="section-title">Build Your Route</h2>
-
-      <p class="section-description">
-        Enter a start, add up to 20 stops between the start and destination, then enter your final destination.
-      </p>
-
-      <div class="start-wrapper">
-        <div class="destination-label-row">
-          <label for="start">Start</label>
-          <span class="destination-badge">Origin</span>
-        </div>
-
-        <input
-          id="start"
-          type="text"
-          placeholder="Enter starting address"
-          autocomplete="off"
-        >
-        <p class="stop-counter">
-          Starting point. Optimize will not reorder this address.
-        </p>
-      </div>
-
-      <label for="stop-input">Add a stop</label>
-
-      <div class="input-row">
-        <input
-          id="stop-input"
-          type="text"
-          placeholder="Enter an address"
-          autocomplete="off"
-        >
-
-        <button
-          id="add-stop"
-          class="add-button"
-          type="button"
-        >
-          + Add Stop
-        </button>
-      </div>
-
-      <p
-        id="stop-counter"
-        class="stop-counter"
-        aria-live="polite"
-      >
-        0 of 20 stops between start and destination
-      </p>
-
-      <div
-        id="stops-container"
-        class="stops-container"
-        aria-live="polite"
-      ></div>
-
-      <div class="divider"></div>
-
-      <div class="destination-wrapper">
-        <div class="destination-label-row">
-          <label for="destination">Destination</label>
-          <span class="destination-badge">Final Stop</span>
-        </div>
-
-        <input
-          id="destination"
-          type="text"
-          placeholder="Enter final destination"
-          autocomplete="off"
-        >
-      </div>
-
-      <div class="fuel-settings">
-        <div>
-          <label for="vehicle-mpg">Vehicle MPG</label>
-          <input id="vehicle-mpg" type="number" min="1" step="0.1" value="15">
-        </div>
-
-        <div>
-          <label for="fuel-price">Fuel price per gallon</label>
-          <input id="fuel-price" type="number" min="0.01" step="0.01" value="4.50">
-        </div>
-      </div>
-
-      <div class="actions">
-        <button
-          id="optimize-route"
-          class="action-button optimize-button"
-          type="button"
-        >
-          Optimize Route
-        </button>
-
-        <button
-          id="calculate-route"
-          class="action-button calculate-button"
-          type="button"
-        >
-          Calculate Route
-        </button>
-      </div>
-
-      <div class="saved-routes">
-        <h3 class="saved-routes-title">Saved Routes</h3>
-
-        <label for="route-name">Route name</label>
-        <div class="save-row">
-          <input id="route-name" type="text" placeholder="Example: Monday deliveries">
-          <button id="save-route" class="saved-route-button" type="button">
-            Save Route
-          </button>
-        </div>
-
-        <label for="saved-route-select">Load a saved route</label>
-        <div class="save-row">
-          <select id="saved-route-select">
-            <option value="">No saved routes</option>
-          </select>
-          <button id="load-route" class="saved-route-button" type="button">
-            Load Route
-          </button>
-          <button id="delete-route" class="saved-route-button delete-route-button" type="button">
-            Delete Route
-          </button>
-        </div>
-      </div>
-
-      <p
-        id="route-message"
-        class="route-message"
-        aria-live="polite"
-      ></p>
-      <p id="route-stale-warning" class="route-message" role="status" hidden>
-        Addresses changed. Results are out of date. Calculate or Optimize Route again.
-      </p>
-      <div id="navigation-results" hidden>
-        <label class="location-option" for="start-from-location">
-          <input id="start-from-location" type="checkbox">
-          Start from my location
-        </label>
-        <div id="navigation-controls" class="navigation-controls"></div>
-        <div class="navigation-controls">
-          <button id="start-trip" type="button">Start trip</button>
-        </div>
-      </div>
-      <section id="trip-panel" class="trip-panel" aria-live="polite" hidden>
-        <p id="trip-stop-number"></p>
-        <p id="trip-stop-address"></p>
-        <div class="trip-actions">
-          <button id="navigate-stop" type="button">Navigate to this stop</button>
-          <button id="trip-next" type="button">Arrived / Next</button>
-          <button id="trip-back" type="button">Back</button>
-          <button id="finish-trip" type="button" hidden>Finish trip</button>
-          <button id="end-trip" type="button">End trip</button>
-        </div>
-      </section>
-      <section id="trip-report" class="report-panel" hidden>
-        <h2>Trip Report</h2>
-        <p id="report-status"></p>
-        <label for="driver-name">Driver name (optional)</label>
-        <input id="driver-name" type="text" autocomplete="name" placeholder="Enter driver name">
-        <div id="report-summary"></div>
-        <h3>Stops</h3>
-        <ol id="report-stops"></ol>
-        <label for="report-notes">Notes (optional)</label>
-        <textarea id="report-notes" placeholder="Add trip notes"></textarea>
-        <div class="trip-actions">
-          <button id="copy-report" type="button">Copy report</button>
-          <button id="email-report" type="button">Email report</button>
-          <button id="share-report" type="button" hidden>Share</button>
-        </div>
-        <p id="report-message" role="status" aria-live="polite"></p>
-      </section>
-      <section class="report-history">
-        <h2>Trip reports</h2>
+      <section class="panel report-history" aria-labelledby="reports-heading">
+        <h2 id="reports-heading" class="panel-title"><span class="tick" aria-hidden="true"></span>Trip reports</h2>
+        <section id="trip-report" class="report-panel" hidden>
+          <h2>Trip Report</h2>
+          <p id="report-status"></p>
+          <label for="driver-name">Driver name (optional)</label>
+          <input id="driver-name" type="text" autocomplete="name" placeholder="Enter driver name">
+          <div id="report-summary"></div>
+          <h3>Stops</h3>
+          <ol id="report-stops"></ol>
+          <label for="report-notes">Notes (optional)</label>
+          <textarea id="report-notes" placeholder="Add trip notes"></textarea>
+          <div class="trip-actions">
+            <button id="copy-report" type="button">Copy report</button>
+            <button id="email-report" type="button">Email report</button>
+            <button id="share-report" type="button" hidden>Share</button>
+          </div>
+          <p id="report-message" class="report-message" role="status" aria-live="polite"></p>
+        </section>
         <p>Saved on this device. The most recent 100 reports are kept.</p>
         <div class="trip-actions">
           <button id="export-reports" type="button">Export CSV</button>
         </div>
         <div id="trip-reports-list"></div>
-        <p id="history-message" role="status" aria-live="polite"></p>
+        <p id="history-message" class="history-message" role="status" aria-live="polite"></p>
       </section>
-      <div id="map"></div>
-    </section>
 
-    <p class="footer-note">
-      D7 Route • Route planning made simple
-    </p>
-  </main>
+      <p class="footer-note">D7 Route · D7 Marketing</p>
+    </div>
+  </div>
 
   <script>
     const MAX_STOPS = 20;
@@ -1705,6 +2047,60 @@
     }
 
     updateStopCounter();
+  
+    function presentRouteReadout() {
+      const message = document.getElementById("route-message");
+      if (!message) return;
+      const text = message.textContent || "";
+      const matched = text.match(/^Route (?:calculated|optimized): ([\d.]+) miles • ([^•]+?)(?: • Est\. fuel: (\$[\d.]+))?$/);
+      const milesEl = document.getElementById("stat-miles");
+      const unitEl = document.getElementById("stat-miles-unit");
+      const durationEl = document.getElementById("stat-duration");
+      const fuelEl = document.getElementById("stat-fuel");
+      const clears = !text ||
+        /^(Calculating route|Optimizing route|Could not calculate route|Enter a starting address|Enter your final destination|Enter an address for every stop|Route request timed out|Route loaded:|Wait for the map)/.test(text) ||
+        text.indexOf("couldn't load") !== -1;
+      if (milesEl && durationEl && fuelEl) {
+        if (matched) {
+          milesEl.textContent = matched[1];
+          if (unitEl) unitEl.textContent = "mi";
+          durationEl.textContent = matched[2].trim();
+          fuelEl.textContent = matched[3] || "—";
+        } else if (clears) {
+          milesEl.textContent = "—";
+          if (unitEl) unitEl.textContent = "";
+          durationEl.textContent = "—";
+          fuelEl.textContent = "—";
+        }
+      }
+      let kind = "";
+      if (/^(Calculating route|Optimizing route|Wait for the map)/.test(text)) kind = "is-busy";
+      else if (matched || /^(Route saved|Route loaded|Route deleted):/.test(text)) kind = "is-ok";
+      else if (text) kind = "is-error";
+      message.className = "route-message" + (kind ? " " + kind : "");
+    }
+
+    function presentNotice(id, base) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const text = el.textContent || "";
+      const kind = !text ? "" : text.indexOf("Could not") === 0 ? "is-error" : "is-ok";
+      el.className = base + (kind ? " " + kind : "");
+    }
+
+    function watchText(id, fn) {
+      const el = document.getElementById(id);
+      if (!el || typeof MutationObserver !== "function") return;
+      const observer = new MutationObserver(fn);
+      observer.observe(el, { childList: true, characterData: true, subtree: true });
+    }
+
+    presentRouteReadout();
+    presentNotice("report-message", "report-message");
+    presentNotice("history-message", "history-message");
+    watchText("route-message", presentRouteReadout);
+    watchText("report-message", function () { presentNotice("report-message", "report-message"); });
+    watchText("history-message", function () { presentNotice("history-message", "history-message"); });
   </script>
 <script
   async
