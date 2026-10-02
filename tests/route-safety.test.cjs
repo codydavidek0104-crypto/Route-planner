@@ -126,7 +126,7 @@ function setup(confirmations = [], {
     waypoint_order: order,
     legs,
   }] }, status);
-  const calculate = () => click('calculate-route');
+  const calculate = () => click('plan-route');
   const stale = () => {
     assert.equal(el('route-stale-warning').hidden, false);
     assert.equal(renderers[0].map, null);
@@ -156,7 +156,7 @@ function finishTwoStopTrip(a) {
 }
 
 test('trip start snapshots optimized addresses, per-leg estimates, and fuel inputs', () => {
-  const a = setup(); a.add('Second'); a.click('optimize-route');
+  const a = setup(); a.add('Second'); a.click('plan-route');
   a.reply(0, 'OK', [1, 0], [
     { distance: { value: 1609.344 }, duration: { value: 60 } },
     { distance: { value: 3218.688 }, duration: { value: 120 } },
@@ -367,7 +367,7 @@ test('Navigate uses encoded addresses in optimized waypoint order', () => {
   a.destination('Final #4, CA');
   a.add('First & Main');
   a.add('Second / Oak');
-  a.click('optimize-route');
+  a.click('plan-route');
   // Middle stops are Start, First & Main, Second / Oak; the start field is the origin.
   a.reply(0, 'OK', [2, 1, 0]);
   assert.equal(a.el('navigation-results').hidden, false);
@@ -504,7 +504,7 @@ test('failed recalculation leaves no previous route or totals', () => {
 });
 
 test('optimization still reorders stops and publishes a current route', () => {
-  const a = setup(); a.add('A'); a.add('B'); a.click('optimize-route');
+  const a = setup(); a.add('A'); a.add('B'); a.click('plan-route');
   assert.equal(a.requests[0].options.optimizeWaypoints, true);
   assert.equal(a.requests[0].options.origin, 'Origin');
   // Middle stops are Start, A, and B. The start field stays the origin.
@@ -559,7 +559,7 @@ test('Maps auth failure makes Calculate and Optimize report the error instead of
   assert.equal(a.el('route-message').textContent, MAPS_ERROR);
   a.calculate();
   assert.equal(a.el('route-message').textContent, MAPS_ERROR);
-  a.click('optimize-route');
+  a.click('plan-route');
   assert.equal(a.el('route-message').textContent, MAPS_ERROR);
   assert.equal(a.requests.length, 0);
 });
@@ -596,13 +596,13 @@ test('Maps script error or load timeout marks maps unavailable', () => {
   // A late initMap after a timeout (not an auth failure) restores routing.
   vm.runInContext('initMap()', slow.context);
   slow.calculate(); slow.reply(0);
-  assert.match(slow.el('route-message').textContent, /Route calculated/);
+  assert.match(slow.el('route-message').textContent, /Route optimized/);
 });
 
 test('route requests time out after 20 seconds and ignore late responses', () => {
   const a = setup(); a.calculate();
   a.advance(19999);
-  assert.equal(a.el('route-message').textContent, 'Calculating route...');
+  assert.equal(a.el('route-message').textContent, 'Optimizing route...');
   a.advance(1);
   assert.equal(a.el('route-message').textContent, 'Route request timed out. Please try again.');
   a.reply(0);
@@ -612,7 +612,7 @@ test('route requests time out after 20 seconds and ignore late responses', () =>
   a.destination('End');
   assert.equal(a.el('route-stale-warning').hidden, true);
   a.calculate(); a.reply(1);
-  assert.match(a.el('route-message').textContent, /Route calculated/);
+  assert.match(a.el('route-message').textContent, /Route optimized/);
 });
 
 test('a timely route response cancels the timeout', () => {
@@ -629,7 +629,7 @@ test('start is required, used as the route origin, and not reordered by Optimize
   a.calculate();
   assert.equal(a.el('route-message').textContent, 'Enter a starting address.');
   assert.equal(a.requests.length, 0);
-  a.click('optimize-route');
+  a.click('plan-route');
   assert.equal(a.el('route-message').textContent, 'Enter a starting address.');
   assert.equal(a.requests.length, 0);
 
@@ -644,7 +644,7 @@ test('start is required, used as the route origin, and not reordered by Optimize
 
   a.add('A');
   a.add('B');
-  a.click('optimize-route');
+  a.click('plan-route');
   const optimizeRequest = a.requests.at(-1);
   assert.equal(optimizeRequest.options.origin, 'Depot');
   assert.equal(optimizeRequest.options.optimizeWaypoints, true);
@@ -663,7 +663,7 @@ test('start is required, used as the route origin, and not reordered by Optimize
 test('the stop limit counts only stops between start and destination', () => {
   const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.match(html, /id="start"/);
-  assert.match(html, /up to 20 stops between the start and destination/);
+  assert.match(html, /0 of 20 stops between start and destination/);
 
   const a = setup();
   assert.match(a.el('stop-counter').textContent, /1 of 20 stops between start and destination/);
@@ -753,7 +753,7 @@ test('the page still works when Places is missing', () => {
   a.calculate();
   a.reply(0);
   assert.equal(a.requests[0].options.origin, 'Depot');
-  assert.match(a.el('route-message').textContent, /Route calculated/);
+  assert.match(a.el('route-message').textContent, /Route optimized/);
   assert.equal(a.el('stops-container').children.at(-1).children[1].textContent, 'Typed stop');
 });
 
@@ -798,7 +798,7 @@ test('editing the start clears the result', () => {
   const a = setup();
   a.calculate();
   a.reply(0);
-  assert.match(a.el('route-message').textContent, /Route calculated/);
+  assert.match(a.el('route-message').textContent, /Route optimized/);
   assert.equal(a.el('navigation-results').hidden, false);
   a.el('start').value = 'New depot';
   a.el('start').listeners.input();
@@ -829,4 +829,34 @@ test('Enter in the add-stop field waits while any suggestion dropdown is open', 
   a.el('stop-input').listeners.keydown({ key: 'Enter' });
   assert.equal(a.el('stops-container').children.length, before + 1);
   assert.equal(a.el('stops-container').children.at(-1).children[1].textContent, 'Crocker');
+});
+
+test('one Plan Route action optimizes and publishes the complete ordered itinerary', () => {
+  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /id="plan-route"[^>]*>Plan Route<\/button>/);
+  assert.doesNotMatch(html, /id="(?:calculate|optimize)-route"/);
+  assert.equal((html.match(/<details class="panel extra-panel">/g) || []).length, 2);
+  const a = setup(); a.add('Second'); a.calculate();
+  assert.equal(a.requests[0].options.optimizeWaypoints, true);
+  a.reply(0, 'OK', [1, 0]);
+  assert.deepEqual(a.el('route-itinerary').children.map(x => x.textContent), [
+    'Start: Origin', 'Stop 1: Second', 'Stop 2: Start', 'Finish: End'
+  ]);
+  a.destination('Changed');
+  assert.equal(a.el('navigation-results').hidden, true);
+});
+
+test('planning never silently omits an unadded stop', () => {
+  const a = setup(); a.el('stop-input').value = 'Unadded address'; a.calculate();
+  assert.equal(a.requests.length, 0);
+  assert.equal(a.el('route-message').textContent, 'Add your typed stop before planning the route.');
+  a.click('add-stop'); a.calculate();
+  assert.deepEqual([...a.requests[0].options.waypoints.map(x => x.location)], ['Start', 'Unadded address']);
+});
+
+test('malformed optimized order cannot duplicate or lose entered stops', () => {
+  for (const order of [[0, 0], [0, 9], [0, 0.5]]) {
+    const a = setup(); a.add('Second'); a.calculate(); a.reply(0, 'OK', order);
+    assert.deepEqual(a.el('stops-container').children.map(x => x.children[1].value), ['Start', 'Second']);
+  }
 });

@@ -22,7 +22,10 @@
   <style>
 
 :root {
-  --bg: #07080a;
+  --bg: #55595d;
+  --address-panel: #4b5055;
+  --address-input: #5b6167;
+  --address-line: #818990;
   --bg-deep: #000;
   --panel: #111316;
   --panel-raised: #1b1e23;
@@ -48,7 +51,11 @@ html { color-scheme: dark; }
 body {
   margin: 0;
   min-height: 100vh;
-  background: #000;
+  background-color: var(--bg);
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0 1px, transparent 1px 4px),
+    radial-gradient(ellipse at 45% 10%, #666a6e 0%, #55595d 55%, #484d51 100%);
+  background-attachment: fixed;
   color: var(--text);
   font-family: inherit;
   font-size: 16px;
@@ -111,6 +118,14 @@ h1 {
   text-transform: uppercase;
 }
 .tick { display: none; }
+.extra-panel > summary { cursor: pointer; margin: 0; padding: 4px 0; }
+.extra-panel[open] > summary { margin-bottom: 16px; }
+.extra-panel > summary:focus-visible { outline: 2px solid var(--red-hot); outline-offset: 5px; }
+.stops-heading { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+.plan-hint { margin: 12px 0 0; color: var(--text-faint); font-size: 13px; }
+.route-itinerary { padding-left: 24px; margin: 0 0 20px; }
+.route-itinerary li { padding: 7px 0; overflow-wrap: anywhere; }
+.itinerary-heading { font-size: 16px; margin: 0 0 8px; }
 .route-panel {
   padding: 0;
   border: 0;
@@ -241,11 +256,35 @@ label {
 }
 .stop-composer { padding: 16px; margin-bottom: 22px; }
 .stop-composer > label { font-size: 14px; color: var(--text); }
+/* Soft graphite address cards float above the dark-silver background. */
+.route-step, .stop-item, .stop-composer {
+  border-color: var(--address-line);
+  background: linear-gradient(145deg, #52585e, var(--address-panel));
+  box-shadow: 0 6px 0 #502d2e, 0 13px 24px rgba(0,0,0,.38),
+    inset 0 1px 0 rgba(255,255,255,.10);
+}
+.route-panel .affix-field,
+.route-panel input:not([type="checkbox"]),
+.route-panel .add-button {
+  border-color: var(--address-line);
+  background: linear-gradient(120deg, #60676d, var(--address-input));
+  color: var(--text);
+}
+.route-panel .affix-field input:not([type="checkbox"]) {
+  border: 0;
+  background: transparent;
+}
+.route-panel input::placeholder { color: #e2e5e9; }
+.route-panel .stop-counter, .route-panel .plan-hint { color: #e2e5e9; }
+.route-panel .section-description { color: #edf0f3; }
+.route-panel .remove-button { background: #332326; color: #ffb7b7; }
+.route-panel .add-button:hover { background: #697078; }
+
 .input-row { display: flex; align-items: stretch; gap: 10px; }
 .input-row input { flex: 1 1 auto; min-width: 0; }
 .divider { display: none; }
 .fuel-settings { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
-.actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 24px; }
+.actions { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 24px; }
 .save-actions { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-top: 14px; }
 button.btn, .navigation-controls button, .trip-actions button,
 .report-entry button, .remove-button {
@@ -425,7 +464,7 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
         <div class="col-main">
           <section class="panel route-panel" aria-labelledby="route-heading">
             <h2 id="route-heading" class="panel-title">Plan your route</h2>
-            <p class="section-description">Enter a start, add up to 20 stops between the start and destination, then enter your final destination.</p>
+            <p class="section-description">Add your start and stops, choose where to finish, then plan your route.</p>
 
             <div class="field route-step start-step">
               <label for="start">Start</label>
@@ -438,9 +477,10 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
                 </span>
                 <input id="start" type="text" placeholder="Enter starting address" autocomplete="off">
               </div>
-              <p class="stop-counter">Starting point. Optimize will not reorder this address.</p>
+              <p class="stop-counter">Your starting point stays fixed.</p>
             </div>
 
+            <h3 class="stops-heading">Stops</h3>
             <div id="stops-container" class="stops-container" aria-live="polite"></div>
 
             <div class="stop-composer">
@@ -460,7 +500,7 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
             <div class="divider"></div>
 
             <div class="field route-step destination-step">
-              <label for="destination">Destination</label>
+              <label for="destination">Finish</label>
               <div class="affix-field">
                 <span class="affix-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
@@ -473,13 +513,13 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
             </div>
 
             <div class="actions">
-              <button id="optimize-route" class="btn action-button optimize-button" type="button">Optimize Route</button>
-              <button id="calculate-route" class="btn action-button calculate-button" type="button">Calculate Route</button>
+              <button id="plan-route" class="btn action-button optimize-button" type="button" aria-describedby="plan-hint">Plan Route</button>
             </div>
+            <p id="plan-hint" class="plan-hint">Optimizes your stops and calculates miles and drive time. Start and finish stay fixed.</p>
           </section>
 
-          <section class="panel" aria-labelledby="vehicle-heading">
-            <h2 id="vehicle-heading" class="panel-title"><span class="tick" aria-hidden="true"></span>Vehicle</h2>
+          <details class="panel extra-panel">
+            <summary id="vehicle-heading" class="panel-title">Fuel settings</summary>
             <div class="fuel-settings">
               <div>
                 <label for="vehicle-mpg">Vehicle MPG</label>
@@ -494,10 +534,10 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
                 </div>
               </div>
             </div>
-          </section>
+          </details>
 
-          <section class="panel" aria-labelledby="saved-heading">
-            <h2 id="saved-heading" class="panel-title"><span class="tick" aria-hidden="true"></span>Saved routes</h2>
+          <details class="panel extra-panel">
+            <summary id="saved-heading" class="panel-title">Saved routes</summary>
             <div class="field">
               <label for="route-name">Route name</label>
               <input id="route-name" type="text" placeholder="Example: Monday deliveries">
@@ -531,7 +571,7 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
                 Delete
               </button>
             </div>
-          </section>
+          </details>
         </div>
 
         <div class="col-side">
@@ -542,11 +582,11 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
 
           <div class="stat-grid" role="group" aria-label="Route totals">
             <div class="stat">
-              <p class="stat-label">Distance</p>
+              <p class="stat-label">Total miles</p>
               <p class="stat-readout"><span id="stat-miles">—</span><span class="stat-unit" id="stat-miles-unit"></span></p>
             </div>
             <div class="stat">
-              <p class="stat-label">Duration</p>
+              <p class="stat-label">Drive time</p>
               <p class="stat-readout"><span id="stat-duration">—</span></p>
             </div>
             <div class="stat">
@@ -559,10 +599,12 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
             <h2 id="trip-heading" class="panel-title"><span class="tick" aria-hidden="true"></span>Trip</h2>
             <p id="route-message" class="route-message" aria-live="polite"></p>
             <p id="route-stale-warning" class="route-message is-warn" role="status" hidden>
-              Addresses changed. Results are out of date. Calculate or Optimize Route again.
+              Addresses changed. Results are out of date. Plan Route again.
             </p>
-            <p class="trip-idle">Calculate or optimize a route to enable navigation.</p>
+            <p class="trip-idle">Plan a route to see your ordered stops and start navigation.</p>
             <div id="navigation-results" hidden>
+              <h3 class="itinerary-heading">Your route, in order</h3>
+              <ol id="route-itinerary" class="route-itinerary"></ol>
               <label class="location-option" for="start-from-location">
                 <input id="start-from-location" type="checkbox">
                 Start from my location
@@ -681,8 +723,7 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
     const stopCounter = document.getElementById("stop-counter");
     const startInput = document.getElementById("start");
     const destinationInput = document.getElementById("destination");
-    const optimizeButton = document.getElementById("optimize-route");
-    const calculateButton = document.getElementById("calculate-route");
+    const planButton = document.getElementById("plan-route");
     const routeMessage = document.getElementById("route-message");
     const vehicleMpgInput = document.getElementById("vehicle-mpg");
     const fuelPriceInput = document.getElementById("fuel-price");
@@ -736,6 +777,14 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
 
     function showNavigation(points) {
       navigationPoints = points;
+      const itinerary = document.getElementById("route-itinerary");
+      itinerary.innerHTML = "";
+      points.forEach((address, index) => {
+        const item = document.createElement("li");
+        const label = index === 0 ? "Start" : index === points.length - 1 ? "Finish" : `Stop ${index}`;
+        item.textContent = `${label}: ${address}`;
+        itinerary.appendChild(item);
+      });
       navigationControls.innerHTML = "";
       // Each leg has an origin, up to nine intermediate stops, and a destination.
       const legs = [];
@@ -1485,8 +1534,15 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
 
     updateSavedRouteOptions();
 
-    optimizeButton.addEventListener("click", () => calculateRoute(true));
-    calculateButton.addEventListener("click", () => calculateRoute(false));
+    planButton.addEventListener("click", () => {
+      // A typed but unadded stop must never be silently left out of the plan.
+      if (stopInput.value.trim()) {
+        routeMessage.textContent = "Add your typed stop before planning the route.";
+        stopInput.focus();
+        return;
+      }
+      calculateRoute(true);
+    });
 
     function calculateRoute(optimize = false) {
       // Only the latest request may publish results, including repeated clicks.
@@ -1565,7 +1621,9 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
             let orderedStops = requestedStops;
             if (optimize && requestedStops.length > 0) {
               const order = result.routes[0].waypoint_order || [];
-              if (order.length === requestedStops.length) {
+              if (order.length === requestedStops.length &&
+                  new Set(order).size === requestedStops.length &&
+                  order.every(index => Number.isInteger(index) && index >= 0 && index < requestedStops.length)) {
                 orderedStops = order.map((index) => requestedStops[index]);
                 stops.splice(0, stops.length, ...orderedStops);
                 renderStops();
