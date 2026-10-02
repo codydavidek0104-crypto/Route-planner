@@ -1260,13 +1260,25 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
       // renderStops replaces inputs; ignore a suggestion from a detached field.
       if (current && current !== input) return;
       stops[index] = input.value;
+      onPlannedAddressFormatted();
+    }
+
+    function onPlannedAddressFormatted() {
+      // Place details can finish after Plan Route is clicked. Keep the user's
+      // pending plan, but discard its response and request the normalized inputs.
+      // Manual input still invalidates immediately and cancels this continuation.
+      const resumePendingPlan = routeRequestPending;
       invalidateRoute();
+      if (resumePendingPlan && !stopInput.value.trim()) {
+        routeStaleWarning.hidden = true;
+        calculateRoute(true);
+      }
     }
 
     function attachAllAutocompletes() {
-      attachAutocomplete(startInput, () => invalidateRoute());
+      attachAutocomplete(startInput, onPlannedAddressFormatted);
       attachAutocomplete(stopInput);
-      attachAutocomplete(destinationInput, () => invalidateRoute());
+      attachAutocomplete(destinationInput, onPlannedAddressFormatted);
       // Stop rows attach on focus (see renderStops).
     }
 
@@ -1501,7 +1513,7 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
       renderStops();
 
       routeMessage.textContent =
-        "Route loaded: " + name + ". Tap Calculate or Optimize Route.";
+        "Route loaded: " + name + ". Tap Plan Route.";
     });
 
     deleteRouteButton.addEventListener("click", () => {

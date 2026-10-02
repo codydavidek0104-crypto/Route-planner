@@ -860,3 +860,47 @@ test('malformed optimized order cannot duplicate or lose entered stops', () => {
     assert.deepEqual(a.el('stops-container').children.map(x => x.children[1].value), ['Start', 'Second']);
   }
 });
+
+test('late Finish place details resume a pending plan with normalized input', () => {
+  const a = setup(); a.destination('200 Santa Monica Pier Santa Monica CA'); a.calculate();
+  const autocomplete = a.autocompletes.find(x => x.input === a.el('destination'));
+  autocomplete.place = { formatted_address: '200 Santa Monica Pier, Santa Monica, CA 90401, USA' };
+  autocomplete.listeners.place_changed();
+  assert.equal(a.requests.length, 2);
+  assert.equal(a.requests[1].options.destination, autocomplete.place.formatted_address);
+  assert.equal(a.requests[1].options.origin, 'Origin');
+  assert.equal(a.requests[1].options.optimizeWaypoints, true);
+  a.reply(0); // Old response must never publish.
+  assert.equal(a.el('navigation-results').hidden, true);
+  a.reply(1);
+  assert.equal(a.el('navigation-results').hidden, false);
+  assert.equal(a.el('route-stale-warning').hidden, true);
+  assert.equal(a.el('route-itinerary').children.at(-1).textContent, 'Finish: ' + autocomplete.place.formatted_address);
+});
+
+test('manual edits after Plan cancel automatic continuation from late place details', () => {
+  const a = setup(); a.calculate(); a.destination('User changed destination');
+  const autocomplete = a.autocompletes.find(x => x.input === a.el('destination'));
+  autocomplete.place = { formatted_address: 'Normalized changed destination' };
+  autocomplete.listeners.place_changed();
+  assert.equal(a.requests.length, 1);
+  a.reply(0);
+  assert.equal(a.el('navigation-results').hidden, true);
+  assert.equal(a.el('route-stale-warning').hidden, false);
+});
+
+test('late Start and stop place details also preserve pending planning intent', () => {
+  for (const target of ['start', 'stop']) {
+    const a = setup();
+    const input = target === 'start' ? a.el('start') : a.el('stops-container').children[0].children[1];
+    if (target === 'stop') input.listeners.focus();
+    a.calculate();
+    const autocomplete = a.autocompletes.find(x => x.input === input);
+    autocomplete.place = { formatted_address: 'Normalized address' };
+    autocomplete.listeners.place_changed();
+    assert.equal(a.requests.length, 2);
+    assert.equal(target === 'start' ? a.requests[1].options.origin : a.requests[1].options.waypoints[0].location, 'Normalized address');
+    a.reply(1); a.reply(0);
+    assert.equal(a.el('navigation-results').hidden, false);
+  }
+});
