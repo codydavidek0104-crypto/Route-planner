@@ -3,8 +3,8 @@
   <rect width="64" height="64" fill="#07080a"/>
   <g transform="translate(0.7999999999999972 7.039999999999999) scale(0.78)">
     
-<path fill="#e10600" fill-rule="evenodd" d="M6 6H20C44 6 50 18 50 32C50 46 44 58 20 58H6ZM18 18H22C34 18 36 24 36 32C36 40 34 46 22 46H18Z"/>
-<path fill="#e10600" d="M56 6H76V15H68L54 58H44L58 15H56Z"/>
+<path fill="#e10600" fill-rule="evenodd" d="M6 6H20C44 6 50 18 50 32C50 46 44 58 20 58H6ZM14 14H22C38 14 42 22 42 32C42 42 38 50 22 50H14Z"/>
+<path fill="#e10600" d="M46 6H78V11L54 58H48L71 11H46Z"/>
 
   </g>
 </svg>

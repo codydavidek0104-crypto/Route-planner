@@ -12,8 +12,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RED = "#e10600";
 const BLACK = "#07080a";
 const MARK = `
-<path fill="${RED}" fill-rule="evenodd" d="M6 6H20C44 6 50 18 50 32C50 46 44 58 20 58H6ZM18 18H22C34 18 36 24 36 32C36 40 34 46 22 46H18Z"/>
-<path fill="${RED}" d="M56 6H76V15H68L54 58H44L58 15H56Z"/>
+<path fill="${RED}" fill-rule="evenodd" d="M6 6H20C44 6 50 18 50 32C50 46 44 58 20 58H6ZM14 14H22C38 14 42 22 42 32C42 42 38 50 22 50H14Z"/>
+<path fill="${RED}" d="M46 6H78V11L54 58H48L71 11H46Z"/>
 `;
 
 function svg(sizePad) {
