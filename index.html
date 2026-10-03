@@ -629,6 +629,7 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
         </div>
       </div>
 
+      <section class="panel" aria-labelledby="command-center-heading"><h2 id="command-center-heading" class="panel-title">Route command center</h2><p>Send trip IDs, stop counts, and start/end times to your private command center. Sign in to the same account there and keep its connection window open during your trip.</p><button id="connect-command-center" type="button">Connect command center</button><p id="command-center-status" role="status">Not connected. Trips are still saved on this device.</p></section>
       <section class="panel report-history" aria-labelledby="reports-heading">
         <h2 id="reports-heading" class="panel-title"><span class="tick" aria-hidden="true"></span>Trip reports</h2>
         <section id="trip-report" class="report-panel" hidden>
@@ -660,6 +661,7 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
     </div>
   </div>
 
+  <script src="command-center.js"></script>
   <script>
     const MAX_STOPS = 20;
     let map;
@@ -823,6 +825,7 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
         routeMessage.textContent = "Could not save trip progress on this device.";
       }
       renderTrip();
+      window.D7Progress?.publish(tripProgress);
     }
 
     document.getElementById("start-trip").addEventListener("click", () => {
@@ -941,6 +944,7 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
         reportMessage.textContent = "Could not save the report on this device. Your trip is still active; try finishing again. You can copy or share this report now.";
         return;
       }
+      window.D7Progress?.publish(report);
       tripProgress = null;
       try { localStorage.removeItem(TRIP_PROGRESS_KEY); } catch { /* A saved report ID also prevents stale restoration. */ }
       renderTrip();
@@ -1740,6 +1744,7 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
     watchText("route-message", presentRouteReadout);
     watchText("report-message", function () { presentNotice("report-message", "report-message"); });
     watchText("history-message", function () { presentNotice("history-message", "history-message"); });
+    window.D7Progress?.configure(() => tripProgress);
   </script>
 <script
   async
