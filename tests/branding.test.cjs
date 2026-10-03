@@ -73,5 +73,5 @@ test('approved silver background and soft graphite address cards keep red primar
   assert.match(html, /--address-input: #5b6167/);
   assert.match(html, /\.route-step, \.stop-item, \.stop-composer \{[\s\S]*?background: linear-gradient\(145deg, #52585e, var\(--address-panel\)\)/);
   assert.match(html, /id="plan-route" class="btn action-button optimize-button"/);
-  assert.match(html, /button\.btn\.optimize-button, button#start-trip, button#finish-trip \{[\s\S]*?background: linear-gradient\(140deg,#f00a16,var\(--red\) 75%\)/);
+  assert.match(html, /button\.btn\.optimize-button, button#start-trip, button#finish-trip \{[\s\S]*?background: linear-gradient\(140deg,#e70712,var\(--red\) 75%\)/);
 });

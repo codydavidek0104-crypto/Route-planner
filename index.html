@@ -27,22 +27,26 @@
   --address-input: #5b6167;
   --address-line: #818990;
   --bg-deep: #000;
-  --panel: #111316;
+  --panel: #30363d;
   --panel-raised: #1b1e23;
   --inset: #171a1f;
-  --line: #30353b;
-  --line-strong: #535b64;
-  --metal: #a5adb8;
+  --line: #626a74;
+  --line-strong: #8f99a4;
+  --metal: #dbe1e8;
   --red: #e10600;
   --red-deep: #b10500;
-  --red-hot: #ff6464;
+  --red-hot: #ff9995;
   --text: #f4f5f7;
   --text-dim: #c5cad3;
-  --text-faint: #a1a8b2;
+  --text-faint: #e2e5e9;
   --ok: #6ee7aa;
   --warn: #ffcb76;
-  --shadow: 0 7px 0 #130304, 0 18px 30px rgba(0,0,0,.85),
-    inset 0 1px 0 rgba(255,255,255,.08);
+  /* All raised surfaces share an upper-left highlight and a downward shadow. */
+  --shadow: 0 3px 0 #22272d, 0 12px 18px -4px rgba(15,19,24,.65),
+    0 24px 34px -14px rgba(15,19,24,.48),
+    inset 0 1px 0 rgba(255,255,255,.32);
+  --control-shadow: 0 2px 0 #30363d, 0 5px 8px rgba(15,19,24,.35),
+    inset 0 1px 0 rgba(255,255,255,.22);
   color-scheme: dark;
   font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
 }
@@ -53,8 +57,7 @@ body {
   min-height: 100vh;
   background-color: var(--bg);
   background-image:
-    repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0 1px, transparent 1px 4px),
-    radial-gradient(ellipse at 45% 10%, #666a6e 0%, #55595d 55%, #484d51 100%);
+    radial-gradient(ellipse at 18% 0%, #c3c8ce 0%, #a0a8b1 45%, #7e8893 100%);
   background-attachment: fixed;
   color: var(--text);
   font-family: inherit;
@@ -71,7 +74,14 @@ button { min-height: 44px; }
   margin: 24px auto 36px;
 }
 .shell { padding: 0; }
-.console-header { padding: 8px 12px 30px; }
+.console-header {
+  padding: 22px 24px;
+  margin-bottom: 32px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: linear-gradient(150deg, #444b53, #292e35 70%, #22272d);
+  box-shadow: var(--shadow);
+}
 .brand { display: flex; align-items: center; gap: 20px; min-width: 0; }
 .logo-mark {
   display: block;
@@ -104,33 +114,30 @@ h1 {
   min-width: 0;
   border: 1px solid var(--line-strong);
   border-radius: 12px;
-  background: linear-gradient(150deg, #1c1f23 0%, #111316 62%, #0d0e10 100%);
+  background: linear-gradient(150deg, #444b53 0%, #30363d 62%, #272c33 100%);
   box-shadow: var(--shadow);
 }
 .panel { position: relative; padding: 20px; margin-bottom: 26px; }
 .panel-title {
   margin: 0 0 16px;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .14em;
   line-height: 1.2;
   text-transform: uppercase;
 }
 .tick { display: none; }
-.extra-panel > summary { cursor: pointer; margin: 0; padding: 4px 0; }
+.extra-panel > summary { cursor: pointer; margin: 0; padding: 12px 0; min-height: 44px; }
 .extra-panel[open] > summary { margin-bottom: 16px; }
-.extra-panel > summary:focus-visible { outline: 2px solid var(--red-hot); outline-offset: 5px; }
+.extra-panel > summary:focus-visible { outline: 3px solid #fff; outline-offset: 5px; }
 .stops-heading { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
 .plan-hint { margin: 12px 0 0; color: var(--text-faint); font-size: 13px; }
 .route-itinerary { padding-left: 24px; margin: 0 0 20px; }
 .route-itinerary li { padding: 7px 0; overflow-wrap: anywhere; }
 .itinerary-heading { font-size: 16px; margin: 0 0 8px; }
 .route-panel {
-  padding: 0;
-  border: 0;
-  background: none;
-  box-shadow: none;
+  padding: 22px;
 }
 .route-panel > .panel-title {
   margin-bottom: 4px;
@@ -150,7 +157,7 @@ label {
   display: block;
   margin-bottom: 8px;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: .02em;
 }
@@ -161,7 +168,8 @@ label {
   padding: 11px 13px;
   border: 1px solid var(--line-strong);
   border-radius: 7px;
-  background: linear-gradient(120deg,#1c2026,#171a1f);
+  background: linear-gradient(120deg, #60676d, #4f565e);
+  box-shadow: var(--control-shadow);
   color: var(--text);
   font: inherit;
   font-size: 16px;
@@ -178,8 +186,9 @@ label {
   min-height: 48px;
   border: 1px solid var(--line-strong);
   border-radius: 7px;
-  background: linear-gradient(120deg,#1c2026,#171a1f);
-  color: var(--text-dim);
+  background: linear-gradient(120deg, #60676d, #4f565e);
+  box-shadow: var(--control-shadow);
+  color: var(--text-faint);
 }
 .affix-field span { flex: 0 0 auto; padding: 0 12px; }
 .affix-field input:not([type="checkbox"]) {
@@ -187,8 +196,9 @@ label {
   width: 0;
   border: 0;
   background: transparent;
+  box-shadow: none;
 }
-.affix-suffix { color: var(--text-dim); font-size: 13px; }
+.affix-suffix { color: var(--text-faint); font-size: 13px; }
 .field { margin-bottom: 16px; }
 .route-step {
   position: relative;
@@ -209,11 +219,11 @@ label {
   background: radial-gradient(circle,#fff 0 5px,var(--red) 6px);
 }
 .destination-step::before { border-radius: 50% 50% 50% 6px; transform: rotate(-45deg); }
-.route-step > .stop-counter { margin-bottom: 0; font-size: 11px; }
+.route-step > .stop-counter { margin-bottom: 0; font-size: 13px; }
 .stop-counter {
   margin: 10px 0 0;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
 }
 .stops-container { display: grid; gap: 22px; margin: 0 0 22px; }
@@ -260,8 +270,7 @@ label {
 .route-step, .stop-item, .stop-composer {
   border-color: var(--address-line);
   background: linear-gradient(145deg, #52585e, var(--address-panel));
-  box-shadow: 0 6px 0 #502d2e, 0 13px 24px rgba(0,0,0,.38),
-    inset 0 1px 0 rgba(255,255,255,.10);
+  box-shadow: var(--shadow);
 }
 .route-panel .affix-field,
 .route-panel input:not([type="checkbox"]),
@@ -273,6 +282,7 @@ label {
 .route-panel .affix-field input:not([type="checkbox"]) {
   border: 0;
   background: transparent;
+  box-shadow: none;
 }
 .route-panel input::placeholder { color: #e2e5e9; }
 .route-panel .stop-counter, .route-panel .plan-hint { color: #e2e5e9; }
@@ -296,7 +306,8 @@ button.btn, .navigation-controls button, .trip-actions button,
   padding: 12px 14px;
   border: 1px solid var(--line-strong);
   border-radius: 7px;
-  background: linear-gradient(150deg,#242930,#171a1f);
+  background: linear-gradient(150deg, #59616b, #3c444e);
+  box-shadow: var(--control-shadow);
   color: var(--text);
   font: inherit;
   font-size: 14px;
@@ -310,18 +321,19 @@ button.btn svg { flex: 0 0 auto; }
 button.btn.action-button, button#start-trip { width: 100%; min-height: 54px; }
 button.btn.optimize-button, button#start-trip, button#finish-trip {
   border-color: #ff3732;
-  background: linear-gradient(140deg,#f00a16,var(--red) 75%);
+  background: linear-gradient(140deg,#e70712,var(--red) 75%);
   color: #fff;
-  box-shadow: 0 5px 0 #470405, 0 9px 18px rgba(225,6,0,.16);
+  box-shadow: 0 3px 0 #710503, 0 9px 16px rgba(15,19,24,.45),
+    inset 0 1px 0 rgba(255,255,255,.3);
 }
 button.btn.optimize-button:hover, button#start-trip:hover, button#finish-trip:hover {
-  background: var(--red-deep);
+  background: #bd0500;
 }
 button.btn:hover, .navigation-controls button:hover, .trip-actions button:hover,
 .report-entry button:hover { border-color: var(--metal); }
 button.remove-button, button#delete-route, button#end-trip, .report-entry button:last-child {
-  background: transparent;
-  color: var(--red-hot);
+  background: linear-gradient(150deg, #39282c, #2d2024);
+  color: #ffb7b7;
   border-color: #794143;
 }
 .remove-button { min-width: 44px; flex: 0 0 auto; padding: 8px; font-size: 12px; }
@@ -329,7 +341,7 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
 .shell button:disabled { cursor: not-allowed; opacity: .45; box-shadow: none; }
 .shell button:focus-visible, .shell input:focus-visible,
 .shell select:focus-visible, .shell textarea:focus-visible {
-  outline: 2px solid var(--red-hot);
+  outline: 3px solid #fff;
   outline-offset: 3px;
 }
 #map :focus-visible { outline: revert; }
@@ -338,14 +350,18 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
 #map {
   width: 100%;
   height: 420px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--metal);
   border-radius: 8px;
-  background: #171a1f;
+  background: #30363d;
+  box-shadow: var(--control-shadow);
 }
-.stat-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; margin-bottom: 26px; }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr 1.25fr; gap: 16px; margin-bottom: 26px; }
 .stat { min-height: 112px; padding: 20px; }
-.stat-label { margin: 0; color: var(--text-dim); font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+.stat-label { margin: 0; color: var(--text-dim); font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .stat-readout { margin: 14px 0 0; font-size: 28px; font-weight: 650; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.fuel-stat { border-color: var(--metal); box-shadow: var(--shadow), inset 0 3px 0 var(--red); }
+.fuel-stat .stat-label { color: var(--text); }
+.fuel-stat .stat-readout { font-size: 32px; font-weight: 750; }
 .stat-unit { margin-left: 7px; color: var(--text-dim); font-size: 14px; }
 .route-message {
   min-height: 44px;
@@ -390,30 +406,30 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
 .report-message:empty, .history-message:empty { margin: 0; }
 .report-message.is-ok, .history-message.is-ok { color: var(--ok); }
 .report-message.is-error, .history-message.is-error { color: var(--red-hot); }
-.footer-note { margin: 28px 0 0; color: var(--text-faint); font-size: 11px; letter-spacing: .14em; text-align: center; text-transform: uppercase; }
-.pac-container { border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); box-shadow: 0 14px 32px #0009; font-family: inherit; }
-.pac-item { min-height: 44px; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--text-dim); line-height: 28px; }
+.footer-note { margin: 28px 0 0; color: #131920; font-size: 12px; font-weight: 600; letter-spacing: .1em; text-align: center; text-transform: uppercase; }
+.pac-container { z-index: 1000; border: 1px solid var(--metal); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); font-family: inherit; }
+.pac-item { min-height: 48px; padding: 10px 12px; border-top: 1px solid var(--line); color: var(--text-dim); font-size: 14px; line-height: 28px; }
 .pac-item:hover, .pac-item-selected { background: #262c34; }
 .pac-item-query { color: var(--text); font-size: 15px; }
 .pac-matched { color: var(--red-hot); }
 @media (min-width: 900px) {
-  .workspace { display: grid; grid-template-columns: minmax(310px,.36fr) minmax(0,.64fr); gap: 28px; align-items: start; }
+  .workspace { display: grid; grid-template-columns: minmax(340px,.38fr) minmax(0,.62fr); gap: 30px; align-items: start; }
   #map { height: clamp(480px, 48vw, 620px); }
 }
 @media (max-width: 899px) {
   .frame-glow { width: min(720px, calc(100% - 36px)); margin-top: 16px; }
-  .console-header { padding-bottom: 24px; }
+  .console-header { padding: 20px; }
 }
 @media (max-width: 480px) {
   .frame-glow { width: calc(100% - 28px); margin-top: 12px; }
-  .console-header { padding: 4px 0 24px; }
+  .console-header { padding: 18px; margin-bottom: 24px; }
   .brand { gap: 12px; }
   .brand-text { padding-left: 12px; }
   .logo-mark { width: 70px; height: 58px; }
   h1 { font-size: 28px; }
-  .brand-sub { font-size: 10px; letter-spacing: .2em; }
+  .brand-sub { font-size: 11px; letter-spacing: .16em; }
   .panel { padding: 16px; }
-  .route-panel { padding: 0; }
+  .route-panel { padding: 16px; }
   .route-step { padding: 14px 14px 16px 58px; }
   .route-step::before { left: 14px; width: 28px; height: 28px; }
   .stop-item { gap: 8px; padding: 36px 10px 14px; }
@@ -423,16 +439,19 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
   .remove-button { padding: 8px 4px; }
   .actions { gap: 10px; }
   button.btn { padding: 11px 9px; font-size: 13px; }
-  .stat-grid { gap: 10px; }
-  .stat { min-height: 100px; padding: 14px 10px; }
-  .stat-label { font-size: 10px; letter-spacing: .04em; }
+  .stat-grid { gap: 16px; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .stat { min-height: 100px; padding: 16px; }
+  .stat-label { font-size: 13px; letter-spacing: .02em; }
   .stat-readout { font-size: 22px; }
+  .fuel-stat { grid-column: 1 / -1; order: -1; }
   .map-panel { padding: 6px; }
   #map { height: 360px; }
 }
 @media (max-width: 360px) {
   .input-row { flex-wrap: wrap; }
   .input-row input, .input-row .add-button { width: 100%; }
+  .fuel-settings { grid-template-columns: 1fr; }
+  .save-actions { grid-template-columns: 1fr; }
   .actions { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: 1fr; }
   .stat { min-height: 88px; }
@@ -589,8 +608,8 @@ button.remove-button, button#delete-route, button#end-trip, .report-entry button
               <p class="stat-label">Drive time</p>
               <p class="stat-readout"><span id="stat-duration">—</span></p>
             </div>
-            <div class="stat">
-              <p class="stat-label">Est. fuel cost</p>
+            <div class="stat fuel-stat">
+              <p class="stat-label">Estimated fuel cost</p>
               <p class="stat-readout"><span id="stat-fuel">—</span></p>
             </div>
           </div>
