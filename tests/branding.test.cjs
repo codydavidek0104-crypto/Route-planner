@@ -67,11 +67,11 @@ test('brand colors stay in custom properties and the map control guard remains',
   assert.match(html, /key=AIzaSyDlsd2EZo4MxLunslRRMm-Xuy_Y0g6yEYM&libraries=places&callback=initMap/);
 });
 
-test('approved silver background and soft graphite address cards keep red primary action', () => {
-  assert.match(html, /--bg: #55595d/);
-  assert.match(html, /--address-panel: #4b5055/);
-  assert.match(html, /--address-input: #5b6167/);
-  assert.match(html, /\.route-step, \.stop-item, \.stop-composer \{[\s\S]*?background: linear-gradient\(145deg, #52585e, var\(--address-panel\)\)/);
+test('approved silver background and graphite address cards keep red primary action', () => {
+  assert.match(html, /--bg: #929ca5/);
+  assert.match(html, /--address-panel: #25313b/);
+  assert.match(html, /--address-input: #303b45/);
+  assert.match(html, /\.route-step, \.stop-item, \.stop-composer \{[\s\S]*?background: linear-gradient\(145deg, #3e4c56, var\(--address-panel\)\)/);
   assert.match(html, /id="plan-route" class="btn action-button optimize-button"/);
   assert.match(html, /button\.btn\.optimize-button, button#start-trip, button#finish-trip \{[\s\S]*?background: linear-gradient\(140deg,#e70712,var\(--red\) 75%\)/);
 });
