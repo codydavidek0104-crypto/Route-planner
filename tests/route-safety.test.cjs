@@ -6,13 +6,14 @@ const path = require('node:path');
 
 // Run the actual page script with controlled Maps responses and a minimal DOM.
 function setup(confirmations = [], {
-  init = true, storage = {}, places = true, navigatorApi = {},
+  init = true, storage = {}, places = true, navigatorApi = {}, mapTheme = false,
   initialTime = Date.parse('2026-09-28T16:00:00Z')
 } = {}) {
   const elements = new Map();
   const downloads = [];
   const blobs = [];
   const fallbackCopies = [];
+  let focusedElement = null;
   function element(tagName = 'div') {
     return {
       tagName,
@@ -27,7 +28,7 @@ function setup(confirmations = [], {
       },
       addEventListener(name, fn) { this.listeners[name] = fn; },
       setAttribute(name, value) { this[name] = value; },
-      focus() {}, select() {}, scrollIntoView() {},
+      focus() { focusedElement = this; }, select() {}, scrollIntoView() {},
     };
   }
   const el = id => {
@@ -37,7 +38,10 @@ function setup(confirmations = [], {
   el('vehicle-mpg').value = '15';
   el('fuel-price').value = '4.50';
   const requests = [];
+  const mapsInstances = [];
   const renderers = [];
+  const markerInstances = [];
+  const pointInstances = [];
   const autocompletes = [];
   const stored = storage;
   const opened = [];
@@ -59,12 +63,22 @@ function setup(confirmations = [], {
     now = target;
   };
   const maps = {
-    Map: class {},
+    Map: class {
+      constructor(container, options) { this.container = container; this.options = options; mapsInstances.push(this); }
+    },
     DirectionsService: class { route(options, callback) { requests.push({ options, callback }); } },
     DirectionsRenderer: class {
-      constructor() { renderers.push(this); }
+      constructor(options) { this.options = options; renderers.push(this); }
       setMap(map) { this.map = map; }
       setDirections(result) { this.result = result; }
+      setOptions(options) { this.options = { ...this.options, ...options }; }
+    },
+    Point: class {
+      constructor(x, y) { this.x = x; this.y = y; pointInstances.push(this); }
+    },
+    Marker: class {
+      constructor(options) { this.options = options; this.map = options.map; markerInstances.push(this); }
+      setMap(map) { this.map = map; }
     },
     TravelMode: { DRIVING: 'DRIVING' },
   };
@@ -116,16 +130,25 @@ function setup(confirmations = [], {
     },
     google: { maps },
   });
-  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], context);
+  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8').replace(/AIza[0-9A-Za-z_-]+/g, 'REDACTED_BROWSER_MAPS_KEY');
+  const fuelTag = html.match(/<details\b[^>]*\bid=["']fuel-settings["'][^>]*>/)?.[0] || '';
+  el('fuel-settings').open = /\sopen(?:\s|=|>)/.test(fuelTag);
+  el('fuel-settings').hidden = /\shidden(?:\s|=|>)/.test(fuelTag);
+  if (mapTheme) vm.runInContext(readFileSync(path.join(__dirname, '../map-theme.js'), 'utf8'), context);
+  vm.runInContext(readFileSync(path.join(__dirname, '../app.js'), 'utf8'), context);
   if (init) vm.runInContext('initMap()', context);
   const click = id => el(id).listeners.click();
   const add = address => { el('stop-input').value = address; click('add-stop'); };
   const destination = address => { el('destination').value = address; el('destination').listeners.input(); };
-  const reply = (index, status = 'OK', order = [], legs = [{ distance: { value: 16093.44 }, duration: { value: 5100 } }]) => requests[index].callback({ routes: [{
-    waypoint_order: order,
-    legs,
-  }] }, status);
+  const reply = (index, status = 'OK', order, legs) => {
+    const count = requests[index].options.waypoints.length;
+    requests[index].callback({ routes: [{
+      waypoint_order: order ?? Array.from({ length: count }, (_, i) => i),
+      legs: legs ?? Array.from({ length: count + 1 }, () => ({
+        distance: { value: 16093.44 / (count + 1) }, duration: { value: 5100 / (count + 1) },
+      })),
+    }] }, status);
+  };
   const calculate = () => click('plan-route');
   const stale = () => {
     assert.equal(el('route-stale-warning').hidden, false);
@@ -139,9 +162,9 @@ function setup(confirmations = [], {
   }
   const savedRoutes = () => JSON.parse(stored.d7SavedRoutes || '{}');
   return {
-    el, click, add, destination, requests, renderers, reply, calculate, stale,
+    el, click, add, destination, requests, mapsInstances, renderers, markerInstances, pointInstances, reply, calculate, stale,
     savedRoutes, confirmationMessages, advance, context, autocompletes, stored, opened,
-    downloads, blobs, fallbackCopies,
+    downloads, blobs, fallbackCopies, focused: () => focusedElement,
   };
 }
 
@@ -354,12 +377,15 @@ test('storage errors keep a trip available to retry and a saved report prevents 
 
 test('snapshot fuel cost matches the displayed estimate; Maps controls keep their own size', () => {
   const a = setup(); a.calculate();
-  a.reply(0, 'OK', [], [{ distance: { value: 27951.8 }, duration: { value: 1901 } }]);
+  a.reply(0, 'OK', [0], [
+    { distance: { value: 13975.9 }, duration: { value: 950.5 } },
+    { distance: { value: 13975.9 }, duration: { value: 950.5 } },
+  ]);
   assert.match(a.el('route-message').textContent, /17.4 miles .* Est. fuel: \$5.22/);
   a.click('start-trip');
   assert.equal(JSON.parse(a.stored.d7TripProgress).routeSnapshot.fuelCost.toFixed(2), '5.22');
-  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /#map button \{ min-height: 0; \}/);
+  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8').replace(/AIza[0-9A-Za-z_-]+/g, 'REDACTED_BROWSER_MAPS_KEY');
+  assert.match(readFileSync(path.join(__dirname, '../styles.css'), 'utf8'), /#map button \{ min-height: 0; \}/);
 });
 
 test('Navigate uses encoded addresses in optimized waypoint order', () => {
@@ -559,7 +585,7 @@ test('Maps auth failure makes Calculate and Optimize report the error instead of
   assert.equal(a.el('route-message').textContent, MAPS_ERROR);
   a.calculate();
   assert.equal(a.el('route-message').textContent, MAPS_ERROR);
-  a.click('plan-route');
+  a.click('calculate-route');
   assert.equal(a.el('route-message').textContent, MAPS_ERROR);
   assert.equal(a.requests.length, 0);
 });
@@ -574,7 +600,7 @@ test('Maps auth failure during a pending request abandons it', () => {
 });
 
 test('Maps script error or load timeout marks maps unavailable', () => {
-  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8').replace(/AIza[0-9A-Za-z_-]+/g, 'REDACTED_BROWSER_MAPS_KEY');
   assert.match(html, /<script[^>]*onerror="handleMapsLoadFailure\(\)"[^>]*maps\.googleapis\.com/);
 
   const errored = setup([], { init: false });
@@ -661,7 +687,7 @@ test('start is required, used as the route origin, and not reordered by Optimize
 });
 
 test('the stop limit counts only stops between start and destination', () => {
-  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8').replace(/AIza[0-9A-Za-z_-]+/g, 'REDACTED_BROWSER_MAPS_KEY');
   assert.match(html, /id="start"/);
   assert.match(html, /0 of 20 stops between start and destination/);
 
@@ -831,11 +857,7 @@ test('Enter in the add-stop field waits while any suggestion dropdown is open', 
   assert.equal(a.el('stops-container').children.at(-1).children[1].textContent, 'Crocker');
 });
 
-test('one Plan Route action optimizes and publishes the complete ordered itinerary', () => {
-  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  assert.match(html, /id="plan-route"[^>]*>Plan Route<\/button>/);
-  assert.doesNotMatch(html, /id="(?:calculate|optimize)-route"/);
-  assert.equal((html.match(/<details class="panel extra-panel">/g) || []).length, 2);
+test('Optimize Route publishes the complete ordered itinerary', () => {
   const a = setup(); a.add('Second'); a.calculate();
   assert.equal(a.requests[0].options.optimizeWaypoints, true);
   a.reply(0, 'OK', [1, 0]);
@@ -858,7 +880,221 @@ test('malformed optimized order cannot duplicate or lose entered stops', () => {
   for (const order of [[0, 0], [0, 9], [0, 0.5]]) {
     const a = setup(); a.add('Second'); a.calculate(); a.reply(0, 'OK', order);
     assert.deepEqual(a.el('stops-container').children.map(x => x.children[1].value), ['Start', 'Second']);
+    assert.equal(a.el('navigation-results').hidden, true);
+    assert.match(a.el('route-message').textContent, /invalid optimized stop order/);
   }
+});
+
+test('all 20 stops are optimized together before navigation is split', () => {
+  const a = setup();
+  for (let i = 2; i <= 20; i++) a.add(`Stop ${i}`);
+  a.calculate();
+  assert.equal(a.requests.length, 1);
+  assert.equal(a.requests[0].options.waypoints.length, 20);
+  assert.equal(a.requests[0].options.optimizeWaypoints, true);
+  // Moves stops across both navigation boundaries, rather than optimizing groups.
+  const order = Array.from({ length: 20 }, (_, i) => 19 - i);
+  a.reply(0, 'OK', order);
+  const expected = ['Origin', ...order.map(i => i === 0 ? 'Start' : `Stop ${i + 1}`), 'End'];
+  const recovered = [];
+  for (const button of a.el('navigation-controls').children) button.listeners.click();
+  a.opened.forEach((item, index) => {
+    const url = new URL(item.url);
+    if (index === 0) recovered.push(url.searchParams.get('origin'));
+    else assert.equal(url.searchParams.get('origin'), recovered.at(-1));
+    recovered.push(...(url.searchParams.get('waypoints') || '').split('|').filter(Boolean));
+    recovered.push(url.searchParams.get('destination'));
+  });
+  assert.deepEqual(recovered, expected);
+  a.click('start-trip');
+  const snapshot = JSON.parse(a.stored.d7TripProgress).routeSnapshot;
+  assert.deepEqual(snapshot.stops, expected.slice(1, -1));
+  assert.equal(snapshot.legs.length, 21);
+  assert.equal(snapshot.legs[0].to, 'Stop 20');
+  assert.equal(snapshot.legs.at(-1).from, 'Start');
+});
+
+test('mobile and iPad navigation respect the three-waypoint browser limit', () => {
+  for (const navigatorApi of [
+    { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile' },
+    { userAgent: 'Mozilla/5.0 (Linux; Android 15)' },
+    { userAgent: 'Mozilla/5.0 Macintosh Safari', platform: 'MacIntel', maxTouchPoints: 5 },
+  ]) {
+    const a = setup([], { navigatorApi });
+    for (let i = 2; i <= 20; i++) a.add(`Stop ${i}`);
+    a.calculate(); a.reply(0);
+    const points = ['Origin'];
+    assert.equal(a.el('navigation-controls').children.length, 6);
+    for (const button of a.el('navigation-controls').children) {
+      button.listeners.click();
+      const url = new URL(a.opened.at(-1).url);
+      assert.equal(url.searchParams.get('origin'), points.at(-1));
+      const waypoints = (url.searchParams.get('waypoints') || '').split('|').filter(Boolean);
+      assert.ok(waypoints.length <= 3);
+      points.push(...waypoints, url.searchParams.get('destination'));
+    }
+    assert.deepEqual(points, ['Origin', 'Start', ...Array.from({length:19},(_,i)=>`Stop ${i+2}`), 'End']);
+  }
+});
+
+test('incomplete or malformed Maps results never publish navigation or totals', () => {
+  for (const result of [null, { routes: [] }, { routes: [{}] },
+    { routes: [{ waypoint_order: [0], legs: [] }] },
+    { routes: [{ waypoint_order: [0], legs: [{ distance: { value: NaN }, duration: { value: 10 } }, {}] }] }]) {
+    const a = setup(); a.calculate();
+    assert.doesNotThrow(() => a.requests[0].callback(result, 'OK'));
+    assert.equal(a.el('navigation-results').hidden, true);
+    assert.match(a.el('route-message').textContent, /incomplete route result/);
+    a.click('start-trip');
+    assert.equal(a.stored.d7TripProgress, undefined);
+  }
+});
+
+test('offline planning makes no Maps request while saved routes remain loadable', () => {
+  const a = setup([], { navigatorApi: { onLine: false } });
+  a.el('route-name').value = 'Offline route'; a.click('save-route');
+  a.calculate();
+  assert.equal(a.requests.length, 0);
+  assert.match(a.el('route-message').textContent, /offline/);
+  a.el('saved-route-select').value = 'Offline route'; a.click('load-route');
+  assert.equal(a.el('start').value, 'Origin');
+  assert.equal(a.el('destination').value, 'End');
+  assert.match(a.el('offline-status').textContent, /Connect/);
+});
+
+test('Maps authorization failure restores plain-text editing and respects the stop limit', () => {
+  const a = setup();
+  a.context.window.gm_authFailure();
+  for (const id of ['start', 'destination', 'stop-input']) {
+    a.el(id).disabled = true;
+    a.el(id).style.backgroundImage = 'url(maps-error.png)';
+  }
+  a.el('stops-container').children[0].children[1].disabled = true;
+  a.advance(0);
+  for (const id of ['start', 'destination', 'stop-input']) {
+    assert.equal(a.el(id).disabled, false);
+    assert.equal(a.el(id).style.backgroundImage, 'none');
+  }
+  assert.equal(a.el('stops-container').children[0].children[1].disabled, false);
+  for (let i = 2; i <= 20; i++) a.add(`Stop ${i}`);
+  a.context.window.gm_authFailure(); a.advance(0);
+  assert.equal(a.el('stop-input').disabled, true);
+  assert.equal(a.el('start').disabled, false);
+  a.el('route-name').value = 'Maps unavailable'; a.click('save-route');
+  assert.ok(a.savedRoutes()['Maps unavailable']);
+});
+
+function backupFile(a, value, size) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  a.el('import-routes-file').files = [{ size: size ?? Buffer.byteLength(text), text: async () => text }];
+  return a.el('import-routes-file').listeners.change();
+}
+
+function backup(routes) { return { format: 'd7-route-backup', version: 1, routes }; }
+function savedRoute(start = 'Depot') {
+  return { start, stops: ['Customer & <Gate>'], destination: 'Finish #2', vehicleMpg: '12', fuelPrice: '4.25' };
+}
+
+test('saved routes export and import round-trip across devices without changing the working route', async () => {
+  const a = setup(); a.el('route-name').value = 'Monday'; a.click('save-route');
+  a.click('export-routes');
+  const exported = JSON.parse(await a.blobs[0].text());
+  assert.equal(exported.format, 'd7-route-backup');
+  assert.equal(exported.version, 1);
+  assert.equal(exported.exportedAt, '2026-09-28T16:00:00.000Z');
+  assert.equal(a.downloads[0].download, 'd7-saved-routes-2026-09-28.json');
+  assert.equal(a.blobs[0].type, 'application/json');
+  const b = setup(); b.calculate(); b.reply(0);
+  await backupFile(b, exported);
+  assert.deepEqual(b.savedRoutes(), a.savedRoutes());
+  assert.equal(b.el('navigation-results').hidden, false);
+  assert.equal(b.el('start').value, 'Origin');
+  b.el('saved-route-select').value = 'Monday'; b.click('load-route');
+  assert.equal(b.el('navigation-results').hidden, true);
+  assert.equal(b.el('start').value, 'Origin');
+  assert.equal(b.el('destination').value, 'End');
+});
+
+test('imports merge new routes and require confirmation before replacing collisions', async () => {
+  const a = setup([false, true], { storage: { d7SavedRoutes: JSON.stringify({
+    Monday: savedRoute('Original'), Keep: savedRoute('Keep'),
+  }) } });
+  const incoming = backup({ Monday: savedRoute('Replacement'), New: savedRoute('New') });
+  const original = a.stored.d7SavedRoutes;
+  await backupFile(a, incoming);
+  assert.equal(a.stored.d7SavedRoutes, original);
+  assert.match(a.el('backup-message').textContent, /cancelled/);
+  await backupFile(a, incoming);
+  assert.equal(a.savedRoutes().Monday.start, 'Replacement');
+  assert.equal(a.savedRoutes().Keep.start, 'Keep');
+  assert.equal(a.savedRoutes().New.start, 'New');
+  assert.equal(a.confirmationMessages.length, 2);
+  assert.equal(a.el('import-routes-file').value, '');
+});
+
+test('invalid and oversized backups never change saved routes', async () => {
+  const a = setup([], { storage: { d7SavedRoutes: JSON.stringify({ Keep: savedRoute() }) } });
+  const original = a.stored.d7SavedRoutes;
+  for (const invalid of [
+    'not json', null, { format: 'd7-route-backup', version: 2, routes: {} },
+    backup([]), backup({}), backup({ Bad: { ...savedRoute(), stops: [''] } }),
+    backup({ Bad: { ...savedRoute(), stops: Array(21).fill('Address') } }),
+    backup({ Bad: { ...savedRoute(), destination: '<'.repeat(513) } }),
+    backup({ Bad: { ...savedRoute(), fuelPrice: 'Infinity' } }),
+    backup({ Bad: { ...savedRoute(), start: {} } }),
+  ]) {
+    await backupFile(a, invalid);
+    assert.equal(a.stored.d7SavedRoutes, original);
+    assert.match(a.el('backup-message').textContent, /^Could not import/);
+  }
+  await backupFile(a, backup({ New: savedRoute() }), 1024 * 1024 + 1);
+  assert.equal(a.stored.d7SavedRoutes, original);
+  assert.match(a.el('backup-message').textContent, /1 MB/);
+});
+
+test('legacy backups migrate the first stop to the start without losing addresses', async () => {
+  const a = setup();
+  await backupFile(a, backup({ Legacy: { stops: ['Old depot', 'Middle'], destination: 'Finish' } }));
+  assert.deepEqual(a.savedRoutes().Legacy, {
+    start: 'Old depot', stops: ['Middle'], destination: 'Finish', vehicleMpg: '15', fuelPrice: '4.50',
+  });
+});
+
+test('unusual route names and markup stay data without prototype pollution', async () => {
+  const a = setup();
+  a.el('route-name').value = '__proto__'; a.click('save-route');
+  assert.equal(Object.hasOwn(a.savedRoutes(), '__proto__'), true);
+  const routes = Object.create(null);
+  routes.constructor = savedRoute('Constructor depot');
+  routes['<img src=x onerror=alert(1)>'] = savedRoute();
+  await backupFile(a, backup(routes));
+  assert.equal(a.savedRoutes().constructor.start, 'Constructor depot');
+  assert.equal(Object.prototype.start, undefined);
+  assert.ok(a.el('saved-route-select').children.some(option => option.textContent === '<img src=x onerror=alert(1)>'));
+});
+
+test('failed writes and corrupt existing storage keep backups atomic', async () => {
+  const a = setup([], { storage: { d7SavedRoutes: JSON.stringify({ Keep: savedRoute() }) } });
+  const original = a.stored.d7SavedRoutes;
+  a.context.localStorage.setItem = () => { throw new Error('Storage full'); };
+  await backupFile(a, backup({ New: savedRoute() }));
+  assert.equal(a.stored.d7SavedRoutes, original);
+  assert.match(a.el('backup-message').textContent, /Storage full/);
+  a.stored.d7SavedRoutes = 'corrupt';
+  await backupFile(a, backup({ New: savedRoute() }));
+  assert.equal(a.stored.d7SavedRoutes, 'corrupt');
+  a.click('export-routes');
+  assert.equal(a.downloads.length, 0);
+  assert.match(a.el('backup-message').textContent, /Could not export/);
+});
+
+test('a delayed older file read cannot overwrite a newer import', async () => {
+  const a = setup(); let resolve;
+  a.el('import-routes-file').files = [{ size: 1, text: () => new Promise(r => { resolve = r; }) }];
+  const pending = a.el('import-routes-file').listeners.change();
+  await backupFile(a, backup({ New: savedRoute() }));
+  resolve(JSON.stringify(backup({ Old: savedRoute() }))); await pending;
+  assert.deepEqual(Object.keys(a.savedRoutes()), ['New']);
 });
 
 test('late Finish place details resume a pending plan with normalized input', () => {
@@ -903,4 +1139,421 @@ test('late Start and stop place details also preserve pending planning intent', 
     a.reply(1); a.reply(0);
     assert.equal(a.el('navigation-results').hidden, false);
   }
+});
+
+test('Calculate Route preserves entered stop order without requesting optimization', () => {
+  const a = setup(); a.add('Second'); a.click('calculate-route');
+  assert.equal(a.requests.length, 1);
+  assert.equal(a.requests[0].options.optimizeWaypoints, false);
+  assert.deepEqual([...a.requests[0].options.waypoints.map(point => point.location)], ['Start', 'Second']);
+  // A provider permutation is irrelevant when calculating the entered order.
+  a.reply(0, 'OK', [1, 0]);
+  assert.deepEqual(a.el('stops-container').children.map(row => row.children[1].value), ['Start', 'Second']);
+  assert.deepEqual(a.el('route-itinerary').children.map(item => item.textContent), [
+    'Start: Origin', 'Stop 1: Start', 'Stop 2: Second', 'Finish: End',
+  ]);
+  assert.match(a.el('route-message').textContent, /^Route calculated:/);
+  a.click('start-trip');
+  assert.deepEqual(JSON.parse(a.stored.d7TripProgress).routeSnapshot.stops, ['Start', 'Second']);
+});
+
+test('late Places details preserve Calculate Route mode and discard its old response', () => {
+  for (const target of ['start', 'destination', 'stop']) {
+    const a = setup();
+    const input = target === 'stop' ? a.el('stops-container').children[0].children[1] : a.el(target);
+    if (target === 'stop') input.listeners.focus();
+    a.click('calculate-route');
+    const autocomplete = a.autocompletes.find(item => item.input === input);
+    autocomplete.place = { formatted_address: 'Normalized ' + target };
+    autocomplete.listeners.place_changed();
+    assert.equal(a.requests.length, 2, `Expected resumed calculation for ${target}`);
+    assert.equal(a.requests[0].options.optimizeWaypoints, false);
+    assert.equal(a.requests[1].options.optimizeWaypoints, false);
+    const nextAddress = target === 'stop' ? a.requests[1].options.waypoints[0].location :
+      a.requests[1].options[target === 'start' ? 'origin' : 'destination'];
+    assert.equal(nextAddress, 'Normalized ' + target);
+    a.reply(0);
+    assert.equal(a.el('navigation-results').hidden, true);
+    a.reply(1);
+    assert.equal(a.el('navigation-results').hidden, false);
+    assert.match(a.el('route-message').textContent, /^Route calculated:/);
+  }
+});
+
+test('Calculate and Optimize both refuse to omit an unadded typed stop', () => {
+  for (const action of ['calculate-route', 'plan-route']) {
+    const a = setup(); a.el('stop-input').value = 'Unadded address';
+    a.click(action);
+    assert.equal(a.requests.length, 0, `${action} must not send an incomplete route`);
+    assert.match(a.el('route-message').textContent, /Add your typed stop/);
+  }
+});
+
+test('Plan, Saved routes, and Reports navigation reveals exactly one working view', () => {
+  const a = setup();
+  function expectView(selected) {
+    for (const name of ['plan', 'saved', 'reports']) {
+      assert.equal(a.el(name + '-view').hidden, name !== selected, `Unexpected ${name} view visibility`);
+      assert.equal(a.el('view-' + name)['aria-current'], name === selected ? 'page' : 'false');
+    }
+    assert.equal(a.el('journey-controls').hidden, selected !== 'plan');
+  }
+  expectView('plan');
+  a.el('start').value = 'Draft origin';
+  a.el('route-name').value = 'Draft name';
+  a.click('view-saved'); expectView('saved');
+  a.click('view-reports'); expectView('reports');
+  a.click('view-plan'); expectView('plan');
+  assert.equal(a.el('start').value, 'Draft origin');
+  assert.equal(a.el('route-name').value, 'Draft name');
+  assert.equal(a.el('stops-container').children[0].children[1].value, 'Start');
+});
+
+test('Home and Skip reveal Plan and focus its visible heading from other views', () => {
+  for (const link of ['home-link', 'skip-link']) {
+    for (const sourceView of ['saved', 'reports']) {
+      for (const activeTrip of [false, true]) {
+        const a = setup();
+        if (activeTrip) beginTrip(a);
+        a.click('view-' + sourceView);
+        assert.equal(a.el('plan-view').hidden, true);
+        let defaultPrevented = false;
+        a.el(link).listeners.click({ preventDefault() { defaultPrevented = true; } });
+        assert.equal(defaultPrevented, true, `${link} must reveal the destination before focusing it`);
+        assert.equal(a.el('plan-view').hidden, false);
+        assert.equal(a.el('saved-view').hidden, true);
+        assert.equal(a.el('reports-view').hidden, true);
+        assert.equal(a.el('journey-controls').hidden, false);
+        assert.equal(a.el('planner-fields').hidden, activeTrip);
+        assert.equal(a.el('trip-panel').hidden, !activeTrip);
+        assert.equal(a.focused(), a.el(activeTrip ? 'trip-heading' : 'route-heading'),
+          `${link} must focus a visible heading for the current Plan state`);
+      }
+    }
+  }
+});
+
+test('the Fuel shortcut opens Plan from other views and mirrors disclosure state', () => {
+  for (const sourceView of ['saved', 'reports']) {
+    const a = setup(); const fuel = a.el('fuel-settings');
+    assert.equal(fuel.open, true, 'Fuel details starts open as declared in markup');
+    assert.equal(a.el('view-fuel')['aria-expanded'], 'true');
+    fuel.open = false; fuel.listeners.toggle();
+    assert.equal(a.el('view-fuel')['aria-expanded'], 'false');
+
+    a.click('view-' + sourceView); a.click('view-fuel');
+    // Native details dispatches toggle when its open property changes.
+    fuel.listeners.toggle();
+    assert.equal(a.el('plan-view').hidden, false);
+    assert.equal(a.el('saved-view').hidden, true);
+    assert.equal(a.el('reports-view').hidden, true);
+    assert.equal(fuel.hidden, false);
+    assert.equal(fuel.open, true);
+    assert.equal(a.el('view-fuel')['aria-expanded'], 'true');
+    assert.equal(a.focused(), a.el('vehicle-mpg'));
+
+    fuel.open = false; fuel.listeners.toggle();
+    assert.equal(a.el('view-fuel')['aria-expanded'], 'false');
+  }
+});
+
+test('active and restored trips hide planning actions while Fuel access preserves the trip snapshot', () => {
+  for (const restored of [false, true]) {
+    const original = setup(); beginTrip(original);
+    const savedProgress = original.stored.d7TripProgress;
+    const a = restored ? setup([], { storage: original.stored, init: false }) : original;
+    assert.equal(a.el('plan-view').hidden, false);
+    assert.equal(a.el('trip-panel').hidden, false);
+    assert.equal(a.el('planner-fields').hidden, true);
+    assert.equal(a.el('planner-actions').hidden, true);
+    assert.equal(a.el('fuel-settings').open, false);
+    a.el('fuel-settings').listeners.toggle();
+    assert.equal(a.el('view-fuel')['aria-expanded'], 'false');
+
+    a.click(restored ? 'view-reports' : 'view-saved'); a.click('view-fuel');
+    a.el('fuel-settings').listeners.toggle();
+    assert.equal(a.el('plan-view').hidden, false);
+    assert.equal(a.el('fuel-settings').hidden, false);
+    assert.equal(a.el('fuel-settings').open, true);
+    assert.equal(a.focused(), a.el('vehicle-mpg'));
+    assert.equal(a.el('planner-fields').hidden, true);
+    assert.equal(a.el('planner-actions').hidden, true);
+    assert.equal(a.el('trip-panel').hidden, false);
+    assert.equal(a.el('navigation-results').hidden, true);
+
+    a.el('vehicle-mpg').value = '30'; a.el('fuel-price').value = '5';
+    a.el('vehicle-mpg').listeners.input?.(); a.el('fuel-price').listeners.input?.();
+    assert.equal(a.stored.d7TripProgress, savedProgress, 'Editing current settings must not alter active-trip evidence');
+    a.click('trip-next'); a.click('trip-next'); a.click('finish-trip');
+    assert.deepEqual(JSON.parse(a.stored.d7TripReports)[0].routeSnapshot,
+      JSON.parse(savedProgress).routeSnapshot);
+    assert.equal(a.el('planner-fields').hidden, false);
+    assert.equal(a.el('planner-actions').hidden, false);
+  }
+});
+
+test('fuel edits refresh a current estimate without replanning or changing the selected stop order', () => {
+  for (const action of ['plan-route', 'calculate-route']) {
+    const a = setup(); a.add('Second'); a.click(action); a.reply(0, 'OK', [1, 0]);
+    vm.runInContext('presentRouteReadout()', a.context);
+    assert.equal(a.el('stat-fuel').textContent, '$3.00');
+    const rows = a.el('stops-container').children.map(row => row.children[1].value);
+    const itinerary = a.el('route-itinerary').children.map(item => item.textContent);
+    const miles = a.el('stat-miles').textContent;
+    const duration = a.el('stat-duration').textContent;
+    const resultPrefix = action === 'plan-route' ? /^Route optimized:/ : /^Route calculated:/;
+
+    a.el('vehicle-mpg').value = '20'; a.el('vehicle-mpg').listeners.input();
+    assert.equal(a.el('stat-fuel').textContent, '$2.25');
+    assert.match(a.el('route-message').textContent, resultPrefix);
+    assert.match(a.el('route-message').textContent, /Est\. fuel: \$2\.25$/);
+    a.el('fuel-price').value = '6'; a.el('fuel-price').listeners.input();
+    assert.equal(a.el('stat-fuel').textContent, '$3.00');
+    assert.match(a.el('route-message').textContent, /Est\. fuel: \$3\.00$/);
+    assert.equal(a.requests.length, 1);
+    assert.deepEqual(a.el('stops-container').children.map(row => row.children[1].value), rows);
+    assert.deepEqual(a.el('route-itinerary').children.map(item => item.textContent), itinerary);
+    assert.equal(a.el('stat-miles').textContent, miles);
+    assert.equal(a.el('stat-duration').textContent, duration);
+    assert.equal(a.el('navigation-results').hidden, false);
+    a.click('start-trip');
+    const snapshot = JSON.parse(a.stored.d7TripProgress).routeSnapshot;
+    assert.equal(snapshot.mpg, 20);
+    assert.equal(snapshot.fuelPrice, 6);
+    assert.equal(snapshot.fuelCost, 3);
+  }
+});
+
+test('fuel edits preserve saved-route feedback while updating the current valid estimate', () => {
+  const a = setup(); a.calculate(); a.reply(0); vm.runInContext('presentRouteReadout()', a.context);
+  a.el('route-name').value = 'Saved draft'; a.click('save-route');
+  const notice = a.el('route-message').textContent;
+  assert.equal(notice, 'Route saved: Saved draft.');
+  a.el('vehicle-mpg').value = '20'; a.el('vehicle-mpg').listeners.input();
+  assert.equal(a.el('stat-fuel').textContent, '$2.25');
+  assert.equal(a.el('route-message').textContent, notice);
+  vm.runInContext('presentRouteReadout()', a.context);
+  assert.equal(a.el('stat-fuel').textContent, '$2.25');
+  assert.equal(a.requests.length, 1);
+});
+
+test('invalid and overflowing fuel inputs never publish nonfinite estimates or trip fuel costs', () => {
+  for (const [mpg, price] of [
+    ['0', '4.50'], ['-1', '4.50'], ['', '4.50'], ['Infinity', '4.50'],
+    ['15', '0'], ['15', '-1'], ['15', 'not-a-number'], ['15', 'Infinity'],
+    ['5e-324', '1.7976931348623157e308'],
+  ]) {
+    const a = setup(); a.el('vehicle-mpg').value = mpg; a.el('fuel-price').value = price;
+    a.calculate(); a.reply(0); vm.runInContext('presentRouteReadout()', a.context);
+    assert.equal(a.el('stat-fuel').textContent, '—', `Invalid estimate for MPG ${mpg}, price ${price}`);
+    assert.doesNotMatch(a.el('route-message').textContent, /Est\. fuel|Infinity|NaN/);
+    assert.equal(a.el('stat-miles').textContent, '10.0');
+    // Check both the response path and subsequent edits of an existing plan.
+    a.el('vehicle-mpg').value = '15'; a.el('fuel-price').value = '4.50';
+    a.el('vehicle-mpg').listeners.input();
+    assert.equal(a.el('stat-fuel').textContent, '$3.00');
+    a.el('vehicle-mpg').value = mpg; a.el('fuel-price').value = price;
+    a.el('fuel-price').listeners.input();
+    assert.equal(a.el('stat-fuel').textContent, '—');
+    assert.doesNotMatch(a.el('route-message').textContent, /Est\. fuel|Infinity|NaN/);
+    assert.equal(a.requests.length, 1);
+    a.click('start-trip');
+    // Inspect the live snapshot as well as JSON: JSON would mask Infinity as null.
+    assert.equal(vm.runInContext('tripProgress.routeSnapshot.fuelCost', a.context), null);
+    assert.equal(JSON.parse(a.stored.d7TripProgress).routeSnapshot.fuelCost, null);
+  }
+});
+
+test('fuel edits do not recreate estimates without a current completed route', () => {
+  for (const state of ['initial', 'stale', 'pending', 'failed']) {
+    const a = setup();
+    if (state !== 'initial') {
+      a.calculate(); a.reply(0); vm.runInContext('presentRouteReadout()', a.context);
+      if (state === 'stale') a.destination('Edited destination');
+      else {
+        a.calculate();
+        if (state === 'failed') a.reply(1, 'ZERO_RESULTS');
+      }
+      vm.runInContext('presentRouteReadout()', a.context);
+    }
+    const requests = a.requests.length;
+    const notice = a.el('route-message').textContent;
+    a.el('vehicle-mpg').value = '20'; a.el('fuel-price').value = '6';
+    a.el('vehicle-mpg').listeners.input(); a.el('fuel-price').listeners.input();
+    assert.equal(a.el('stat-fuel').textContent, '—', `${state} must not recreate a fuel estimate`);
+    assert.equal(a.el('stat-miles').textContent, '—');
+    assert.equal(a.el('stat-duration').textContent, '—');
+    assert.equal(a.el('route-message').textContent, notice);
+    assert.equal(a.requests.length, requests);
+  }
+});
+
+test('active-trip fuel edits preserve the displayed estimate and the recorded snapshot', () => {
+  const a = setup(); a.calculate(); a.reply(0); vm.runInContext('presentRouteReadout()', a.context);
+  a.click('start-trip');
+  const progress = a.stored.d7TripProgress;
+  const notice = a.el('route-message').textContent;
+  assert.equal(a.el('stat-fuel').textContent, '$3.00');
+  a.click('view-fuel');
+  a.el('vehicle-mpg').value = '20'; a.el('fuel-price').value = '8';
+  a.el('vehicle-mpg').listeners.input(); a.el('fuel-price').listeners.input();
+  assert.equal(a.el('stat-fuel').textContent, '$3.00');
+  assert.equal(a.el('route-message').textContent, notice);
+  assert.equal(a.stored.d7TripProgress, progress);
+  assert.equal(vm.runInContext('tripProgress.routeSnapshot.fuelCost', a.context), 3);
+  assert.equal(a.requests.length, 1);
+});
+
+test('an active trip hides planning navigation and ending it restores the planned controls', () => {
+  const a = setup(); a.calculate(); a.reply(0);
+  assert.equal(a.el('navigation-results').hidden, false);
+  a.click('start-trip');
+  assert.equal(a.el('trip-panel').hidden, false);
+  assert.equal(a.el('navigation-results').hidden, true);
+  assert.equal(a.el('planner-fields').hidden, true);
+  assert.equal(a.el('plan-view').hidden, false);
+  a.click('end-trip');
+  assert.equal(a.el('trip-panel').hidden, true);
+  assert.equal(a.el('navigation-results').hidden, false);
+  assert.equal(a.el('planner-fields').hidden, false);
+  assert.equal(a.el('reports-view').hidden, false);
+  assert.equal(a.el('plan-view').hidden, true);
+  assert.equal(a.el('journey-controls').hidden, true);
+  a.click('view-plan');
+  assert.equal(a.el('navigation-results').hidden, false);
+  assert.equal(a.el('journey-controls').hidden, false);
+});
+
+test('finishing a trip and opening its history report reveal the Reports view', () => {
+  const a = setup(); finishTwoStopTrip(a);
+  assert.equal(a.el('reports-view').hidden, false);
+  assert.equal(a.el('plan-view').hidden, true);
+  assert.equal(a.el('saved-view').hidden, true);
+  assert.equal(a.el('trip-panel').hidden, true);
+  assert.equal(a.el('planner-fields').hidden, false);
+  assert.equal(a.el('navigation-results').hidden, false);
+  assert.equal(a.el('trip-report').hidden, false);
+  a.click('view-plan');
+  a.el('trip-reports-list').children[0].children[0].click();
+  assert.equal(a.el('reports-view').hidden, false);
+  assert.equal(a.el('plan-view').hidden, true);
+});
+
+test('restored trip progress remains available in Plan without showing unrelated navigation', () => {
+  const a = setup(); beginTrip(a);
+  const restored = setup([], { storage: a.stored, init: false });
+  assert.equal(restored.el('plan-view').hidden, false);
+  assert.equal(restored.el('trip-panel').hidden, false);
+  assert.equal(restored.el('planner-fields').hidden, true);
+  assert.equal(restored.el('navigation-results').hidden, true);
+  restored.click('view-reports'); restored.click('view-plan');
+  assert.equal(restored.el('trip-panel').hidden, false);
+  assert.equal(restored.el('trip-stop-address').textContent, 'Start');
+});
+
+test('saved-route address validation reveals the Plan view before focusing its missing field', () => {
+  for (const missing of ['start', 'destination']) {
+    const a = setup(); a.el('route-name').value = 'Named route';
+    a.el(missing).value = ''; a.click('view-saved'); a.click('save-route');
+    assert.equal(a.el('plan-view').hidden, false);
+    assert.equal(a.el('saved-view').hidden, true);
+    assert.equal(a.el('journey-controls').hidden, false);
+    assert.match(a.el('route-message').textContent, /starting address and final destination/);
+    assert.equal(a.stored.d7SavedRoutes, undefined);
+  }
+});
+
+test('map authorization and load failures show a truthful map fallback note', () => {
+  for (const fail of ['auth', 'load', 'timeout']) {
+    const a = setup([], { init: fail === 'auth' });
+    if (fail === 'auth') a.context.window.gm_authFailure();
+    else if (fail === 'load') vm.runInContext('handleMapsLoadFailure()', a.context);
+    else a.advance(15000);
+    assert.equal(a.el('map').hidden, true);
+    assert.equal(a.el('map-access-note').hidden, false);
+    assert.match(a.el('map-access-note').textContent, /map|Google/i);
+    assert.match(a.el('map-access-note').textContent, /unavailable|can.t|cannot|couldn.t|unable|not.*authorized|restricted|needs? (?:an? )?(?:internet|connection)/i);
+    assert.equal(a.requests.length, 0);
+  }
+});
+
+test('offline map fallback explains the connection requirement without displaying made-up metrics', () => {
+  const a = setup([], { init: false, navigatorApi: { onLine: false } });
+  vm.runInContext('handleMapsLoadFailure()', a.context);
+  assert.equal(a.el('map').hidden, true);
+  assert.equal(a.el('map-access-note').hidden, false);
+  assert.match(a.el('map-access-note').textContent, /offline|internet|connect/i);
+  assert.equal(a.requests.length, 0);
+  assert.doesNotMatch(a.el('route-message').textContent, /Route (?:optimized|calculated):/);
+});
+
+test('a successful or late Maps load reveals the live map and removes its failure note', () => {
+  const ready = setup();
+  assert.equal(ready.el('map').hidden, false);
+  assert.equal(ready.el('map-access-note').hidden, true);
+  const slow = setup([], { init: false }); slow.advance(15000);
+  assert.equal(slow.el('map').hidden, true);
+  assert.equal(slow.el('map-access-note').hidden, false);
+  vm.runInContext('initMap()', slow.context);
+  assert.equal(slow.el('map').hidden, false);
+  assert.equal(slow.el('map-access-note').hidden, true);
+});
+
+test('real route coordinates create owned markers that clear on edits and restore native fallback', () => {
+  for (const change of ['edit', 'remove']) {
+    const a = setup([], { mapTheme: true }); a.add('Second'); a.calculate();
+    // Use both actual API LatLng accessors and literal coordinates. Positions
+    // describe the returned optimized leg order rather than uncomputed inputs.
+    const positions = [
+      { lat: () => 38.58, lng: () => -121.49 },
+      { lat: 38.62, lng: -121.51 },
+      { lat: 38.6, lng: -121.5 },
+      { lat: () => 38.65, lng: () => -121.52 },
+    ];
+    const legs = positions.slice(0, -1).map((start_location, index) => ({
+      start_location, end_location: positions[index + 1],
+      distance: { value: 1609.344 }, duration: { value: 60 },
+    }));
+    a.reply(0, 'OK', [1, 0], legs);
+    assert.equal(a.markerInstances.length, 4);
+    assert.deepEqual(a.markerInstances.map(marker => marker.options.title), ['Start', 'Stop 1', 'Stop 2', 'Finish']);
+    assert.deepEqual(a.markerInstances.map(marker => [marker.options.position.lat, marker.options.position.lng]), [
+      [38.58, -121.49], [38.62, -121.51], [38.6, -121.5], [38.65, -121.52],
+    ]);
+    assert.ok(a.markerInstances.every(marker => marker.map === a.mapsInstances[0]));
+    assert.equal(a.renderers[0].options.suppressMarkers, true);
+    assert.deepEqual(a.el('route-itinerary').children.map(item => item.textContent), [
+      'Start: Origin', 'Stop 1: Second', 'Stop 2: Start', 'Finish: End',
+    ]);
+
+    if (change === 'edit') a.destination('Changed destination');
+    else a.el('stops-container').children[0].children[2].click();
+    assert.ok(a.markerInstances.every(marker => marker.map === null), `${change} must detach every owned marker`);
+    assert.equal(a.renderers[0].map, null);
+    assert.equal(a.el('navigation-results').hidden, true);
+
+    a.calculate(); a.reply(1); // Valid metrics but no coordinate capability.
+    assert.equal(a.markerInstances.length, 4, 'No invented marker positions');
+    assert.equal(a.renderers[0].options.suppressMarkers, false);
+    assert.equal(a.renderers[0].map, a.mapsInstances[0]);
+    assert.equal(a.el('navigation-results').hidden, false);
+  }
+});
+
+test('malformed optimized stop order never creates markers even with valid leg coordinates', () => {
+  const a = setup([], { mapTheme: true }); a.add('Second'); a.calculate();
+  const points = [
+    { lat: 38.58, lng: -121.49 }, { lat: 38.6, lng: -121.5 },
+    { lat: 38.62, lng: -121.51 }, { lat: 38.65, lng: -121.52 },
+  ];
+  const legs = points.slice(0, -1).map((start_location, index) => ({
+    start_location, end_location: points[index + 1],
+    distance: { value: 1609.344 }, duration: { value: 60 },
+  }));
+  a.reply(0, 'OK', [0, 0], legs);
+  assert.equal(a.markerInstances.length, 0);
+  assert.notEqual(a.renderers[0].options.suppressMarkers, true);
+  assert.equal(a.renderers[0].result, undefined);
+  assert.equal(a.el('navigation-results').hidden, true);
+  assert.match(a.el('route-message').textContent, /invalid optimized stop order/);
 });
