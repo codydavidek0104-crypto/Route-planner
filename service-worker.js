@@ -3,11 +3,11 @@
 const SCOPE = self.registration.scope;
 const CACHE_PREFIX = `d7-shell-${encodeURIComponent(new URL(SCOPE).pathname)}-`;
 // Bump this version whenever any shell file changes in a release.
-const CACHE_NAME = `${CACHE_PREFIX}v18`;
+const CACHE_NAME = `${CACHE_PREFIX}v19`;
 const SHELL_FILES = [
   './', 'index.html', 'styles.css', 'map-theme.js', 'app.js', 'manifest.webmanifest',
   'favicon.svg', 'favicon-32.png', 'favicon.ico',
-  'icons/mark.svg', 'icons/mark-maskable.svg', 'icons/d7-logo-original.png',
+  'icons/mark.svg', 'icons/mark-maskable.svg', 'icons/d7-mark-only.png',
   'icons/icon-192.png', 'icons/icon-512.png',
   'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png',
 ];

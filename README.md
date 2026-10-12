@@ -16,7 +16,7 @@ No build step or server application is required. Publish the root files and icon
 
 ## Interface and workflow
 
-D7 Route implements the approved Seamless + Horizon hybrid with a pure-black canvas, the original company D7 logo, open underlined address rows, small ring-and-dot stop markers and a red route connector. The route form begins with Start; the single fuel section sits below Finish. Plan, Saved routes and Trip reports select working views without clearing the current draft. The header's Vehicle & fuel shortcut reveals and focuses those same inline MPG and price settings. On tablet and phone, the map sits above the planner and the page scrolls naturally.
+D7 Route implements the approved Seamless + Horizon hybrid with a pure-black canvas, the company D7 mark beside Route and D7 Marketing, open underlined address rows, small ring-and-dot stop markers and a red route connector. The route form begins with Start; the single fuel section sits below Finish. Plan, Saved routes and Trip reports select working views without clearing the current draft. The header's Vehicle & fuel shortcut reveals and focuses those same inline MPG and price settings. On tablet and phone, the map sits above the planner and the page scrolls naturally.
 
 An active trip hides the editable address form, planning actions and planning navigation controls, while keeping trip controls and the map accessible. Fuel settings collapse and remain reachable through their summary or the header shortcut; editing them does not alter a trip's saved snapshot. Restored trips use the same state. Finishing a trip opens its report; Home, Skip and Plan return to the appropriate accessible planning or trip heading. JSON backups live in Saved routes, and CSV/copy/email/share remain in Trip reports. There is no spreadsheet-import placeholder or arrival scheduling.
 
@@ -76,10 +76,11 @@ git diff --check
 
 The original safety and branding suites were run after each implementation stage. Additional regressions exercise whole-route optimization across navigation boundaries, mobile navigation, malformed results, offline route access, worker cache isolation, backup round-trips, collisions/cancellation, invalid files, storage errors, legacy routes, unusual names, and concurrent imports. Tests use mocked Maps responses; real Maps authorization is checked separately at the public URL.
 
-## Original company logo
+## Company D7 mark
 
-The header uses icons/d7-logo-original.png, the unchanged D7 Logo RED.png attachment from Jackie’s October 10 email (SHA-256 df64ed682406e6c8bf5034f80e775fe05fa59209d5a80cfe86f23f6527b9d3ce). It preserves the complete artwork, color and proportions. No email signature or personal contact details are added. Install icons contain that same artwork scaled proportionally on white square canvases; scripts/generate-icons.mjs regenerates them. Small favicon text will be tiny because the complete logo remains intact.
+The header and install icons now use icons/d7-mark-only.png: a D7-only edit of the original company image, removing the domain lettering and Marketing & Installation Services tagline at the user's request. The distinctive black serif D and red sweeping 7 remain beside the existing ROUTE and D7 MARKETING labels. A white backing keeps the black D visible. The built-in image tool removed the embedded lettering; scripts/generate-icons.mjs derives all install sizes from that one mark with proportional scaling and a safe maskable inset.
 
+The untouched original email attachment remains as icons/d7-logo-original.png for reference (SHA-256 df64ed682406e6c8bf5034f80e775fe05fa59209d5a80cfe86f23f6527b9d3ce), but is not displayed or included in the shell cache. The private local recovery archive is unchanged. The header mark is an edited derivative, not the byte-identical original attachment.
 ### October 12 exposure follow-up
 
 The Google key in GitGuardian's reported commit 3ade8d39e61cdd619c5efbd433f267c550cd9bb3 matches the current browser Maps loader key. No server credential was identified in that loader. The signed-in D7 Droute Cloud credentials page returned "Failed to load API keys" during this recovery, so current restrictions and usage could not be verified and no restriction or rotation change was made. The October 10 inspection above is historical evidence, not confirmation of today's settings.

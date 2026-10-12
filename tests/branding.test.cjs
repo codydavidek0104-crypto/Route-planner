@@ -193,17 +193,21 @@ test('route actions remain distinct and address fields remain labelled', () => {
   assert.match(css, /\.pac-container/);
 });
 
-test('the header uses the exact original company PNG and keeps its proportions', () => {
+test('the header and installed assets use only the approved D7 mark while preserving the original reference', () => {
   const { createHash } = require('node:crypto');
   const original = readFileSync(path.join(root, 'icons/d7-logo-original.png'));
   assert.equal(createHash('sha256').update(original).digest('hex'), 'df64ed682406e6c8bf5034f80e775fe05fa59209d5a80cfe86f23f6527b9d3ce');
-  assert.match(html, /<img class="logo-mark" src="icons\/d7-logo-original\.png" width="3118" height="1923"/);
+  const mark = readFileSync(path.join(root, 'icons/d7-mark-only.png'));
+  assert.equal(createHash('sha256').update(mark).digest('hex'), 'e717b033bc65d238f9414152bb3af6732d714ce31682e413ceae50e5b36d47bb');
+  assert.match(html, /<img class="logo-mark" src="icons\/d7-mark-only\.png" width="1280" height="1280" alt="D7"/);
   assert.doesNotMatch(html, /<svg class="logo-mark"/);
   for (const file of ['favicon.svg', 'icons/mark.svg', 'icons/mark-maskable.svg']) {
     const svg = readFileSync(path.join(root, file), 'utf8');
     const embedded = svg.match(/href="data:image\/png;base64,([^"]+)"/)[1];
-    assert.deepEqual(Buffer.from(embedded, 'base64'), original);
+    assert.deepEqual(Buffer.from(embedded, 'base64'), mark);
     assert.match(svg, /preserveAspectRatio="xMidYMid meet"/);
   }
-  assert.doesNotMatch(html, /Jacquelyn|651\.206\.2939|Director of Finance/);
+  assert.doesNotMatch(html, /Jacquelyn|651\.206\.2939|Director of Finance|MyInstallTeam|Installation Services/);
+  assert.doesNotMatch(html, /src="icons\/d7-logo-original\.png"/);
+  assert.match(html, /<p class="brand-sub">D7 Marketing<\/p>/);
 });

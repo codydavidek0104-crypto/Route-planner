@@ -1,12 +1,12 @@
-// Derive square icons from the untouched company PNG, with no crop or recoloring.
+// Derive square icons from the approved D7-only mark, with no added lettering.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 const sharp = createRequire(import.meta.url)('sharp');
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const original = readFileSync(join(root, 'icons/d7-logo-original.png'));
-const ratio = 1923 / 3118;
+const original = readFileSync(join(root, 'icons/d7-mark-only.png'));
+const ratio = 1;
 function svg(scale) {
   const width = 512 * scale, height = width * ratio;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="#fff"/><image x="${(512-width)/2}" y="${(512-height)/2}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,${original.toString('base64')}"/></svg>\n`;
