@@ -121,33 +121,33 @@ test('manifest, icons, and theme color are linked for install', () => {
   assert.ok(ico.readUInt16LE(4) >= 1);
 });
 
-test('installed icons have an opaque black canvas, a visible crimson mark and a safe maskable inset', () => {
+test('installed icons have an opaque white canvas, the original company artwork and a safe maskable inset', () => {
   for (const file of ['icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/icon-maskable-512.png']) {
     const { width, height, channels, pixels } = pngPixels(path.join(root, file));
-    let nonOpaque = 0, black = 0, blackBorderErrors = 0, crimson = 0, farthestColoredSquared = 0;
+    let nonOpaque = 0, white = 0, whiteBorderErrors = 0, crimson = 0, farthestColoredSquared = 0;
     let minX = width, minY = height, maxX = -1, maxY = -1;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const offset = (y * width + x) * channels;
         const r = pixels[offset], g = pixels[offset + 1], b = pixels[offset + 2];
         if (channels === 4 && pixels[offset + 3] !== 255) nonOpaque++;
-        const isBlack = r === 0 && g === 0 && b === 0;
-        if (isBlack) black++;
+        const isWhite = r === 255 && g === 255 && b === 255;
+        if (isWhite) white++;
         else {
           minX = Math.min(minX, x); maxX = Math.max(maxX, x);
           minY = Math.min(minY, y); maxY = Math.max(maxY, y);
           farthestColoredSquared = Math.max(farthestColoredSquared,
             (x + .5 - width / 2) ** 2 + (y + .5 - height / 2) ** 2);
         }
-        if (!isBlack && (x === 0 || y === 0 || x === width - 1 || y === height - 1)) blackBorderErrors++;
-        if (r === 0xdb && g === 0x12 && b === 0x36) crimson++;
+        if (!isWhite && (x === 0 || y === 0 || x === width - 1 || y === height - 1)) whiteBorderErrors++;
+        if (r > 170 && g < 70 && b < 100) crimson++;
       }
     }
     assert.equal(nonOpaque, 0, `${file}: every pixel must be fully opaque`);
-    assert.equal(blackBorderErrors, 0, `${file}: canvas edges must be pure black`);
-    assert.ok(black > width * height * .5, `${file}: the background must remain predominantly pure black`);
-    assert.ok(crimson > width * height * .005, `${file}: the mark must include visible #db1236 fill`);
-    assert.ok(maxX - minX + 1 >= width * .25 && maxY - minY + 1 >= height * .35,
+    assert.equal(whiteBorderErrors, 0, `${file}: canvas edges must be white`);
+    assert.ok(white > width * height * .5, `${file}: the background must remain predominantly white`);
+    assert.ok(crimson > width * height * .005, `${file}: the mark must include visible original red artwork`);
+    assert.ok(maxX - minX + 1 >= width * .25 && maxY - minY + 1 >= height * .25,
       `${file}: the mark must remain large enough to recognize`);
     if (file.includes('maskable')) {
       assert.ok(farthestColoredSquared <= (.4 * Math.min(width, height)) ** 2,
@@ -191,4 +191,19 @@ test('route actions remain distinct and address fields remain labelled', () => {
   assert.match(css, /\[hidden\]\s*\{[^}]*display:\s*none\s*!important/);
   assert.match(css, /:focus-visible/);
   assert.match(css, /\.pac-container/);
+});
+
+test('the header uses the exact original company PNG and keeps its proportions', () => {
+  const { createHash } = require('node:crypto');
+  const original = readFileSync(path.join(root, 'icons/d7-logo-original.png'));
+  assert.equal(createHash('sha256').update(original).digest('hex'), 'df64ed682406e6c8bf5034f80e775fe05fa59209d5a80cfe86f23f6527b9d3ce');
+  assert.match(html, /<img class="logo-mark" src="icons\/d7-logo-original\.png" width="3118" height="1923"/);
+  assert.doesNotMatch(html, /<svg class="logo-mark"/);
+  for (const file of ['favicon.svg', 'icons/mark.svg', 'icons/mark-maskable.svg']) {
+    const svg = readFileSync(path.join(root, file), 'utf8');
+    const embedded = svg.match(/href="data:image\/png;base64,([^"]+)"/)[1];
+    assert.deepEqual(Buffer.from(embedded, 'base64'), original);
+    assert.match(svg, /preserveAspectRatio="xMidYMid meet"/);
+  }
+  assert.doesNotMatch(html, /Jacquelyn|651\.206\.2939|Director of Finance/);
 });

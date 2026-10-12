@@ -16,7 +16,7 @@ No build step or server application is required. Publish the root files and icon
 
 ## Interface and workflow
 
-D7 Route implements the approved Seamless + Horizon hybrid with a pure-black canvas, a compact vector D7 mark, open underlined address rows, small ring-and-dot stop markers and a red route connector. The route form begins with Start; the single fuel section sits below Finish. Plan, Saved routes and Trip reports select working views without clearing the current draft. The header's Vehicle & fuel shortcut reveals and focuses those same inline MPG and price settings. On tablet and phone, the map sits above the planner and the page scrolls naturally.
+D7 Route implements the approved Seamless + Horizon hybrid with a pure-black canvas, the original company D7 logo, open underlined address rows, small ring-and-dot stop markers and a red route connector. The route form begins with Start; the single fuel section sits below Finish. Plan, Saved routes and Trip reports select working views without clearing the current draft. The header's Vehicle & fuel shortcut reveals and focuses those same inline MPG and price settings. On tablet and phone, the map sits above the planner and the page scrolls naturally.
 
 An active trip hides the editable address form, planning actions and planning navigation controls, while keeping trip controls and the map accessible. Fuel settings collapse and remain reachable through their summary or the header shortcut; editing them does not alter a trip's saved snapshot. Restored trips use the same state. Finishing a trip opens its report; Home, Skip and Plan return to the appropriate accessible planning or trip heading. JSON backups live in Saved routes, and CSV/copy/email/share remain in Trip reports. There is no spreadsheet-import placeholder or arrival scheduling.
 
@@ -75,3 +75,13 @@ git diff --check
 ```
 
 The original safety and branding suites were run after each implementation stage. Additional regressions exercise whole-route optimization across navigation boundaries, mobile navigation, malformed results, offline route access, worker cache isolation, backup round-trips, collisions/cancellation, invalid files, storage errors, legacy routes, unusual names, and concurrent imports. Tests use mocked Maps responses; real Maps authorization is checked separately at the public URL.
+
+## Original company logo
+
+The header uses icons/d7-logo-original.png, the unchanged D7 Logo RED.png attachment from Jackie’s October 10 email (SHA-256 df64ed682406e6c8bf5034f80e775fe05fa59209d5a80cfe86f23f6527b9d3ce). It preserves the complete artwork, color and proportions. No email signature or personal contact details are added. Install icons contain that same artwork scaled proportionally on white square canvases; scripts/generate-icons.mjs regenerates them. Small favicon text will be tiny because the complete logo remains intact.
+
+### October 12 exposure follow-up
+
+The Google key in GitGuardian's reported commit 3ade8d39e61cdd619c5efbd433f267c550cd9bb3 matches the current browser Maps loader key. No server credential was identified in that loader. The signed-in D7 Droute Cloud credentials page returned "Failed to load API keys" during this recovery, so current restrictions and usage could not be verified and no restriction or rotation change was made. The October 10 inspection above is historical evidence, not confirmation of today's settings.
+
+Finish the Cloud review by restricting this dedicated key to the listed three APIs and intended website referrers, checking usage/billing for unexpected traffic, and coordinating rotation with the deployed loader if compromise is suspected. Removing the key from a new source commit does not revoke copies already in Git history. Keep preservation archives local and private; they contain the original source and key. Do not upload them as site assets.

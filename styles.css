@@ -29,7 +29,7 @@ button { min-height: 44px; cursor: pointer; }
 .skip-link:focus { transform: translateY(10px); }
 .console-header { display: flex; align-items: center; gap: 42px; min-height: 86px; padding: 12px 40px; border-bottom: 1px solid #262b2f; }
 .brand { display: flex; align-items: center; gap: 24px; min-height: 44px; flex: 0 0 auto; text-decoration: none; }
-.logo-mark { display: block; width: 52px; height: 58px; color: var(--crimson); }
+.logo-mark { display: block; width: 140px; height: auto; object-fit: contain; background: #fff; }
 h1 { margin: 0; font-size: 23px; font-weight: 500; letter-spacing: .36em; line-height: 1.2; text-transform: uppercase; }
 .brand-sub { margin: 7px 0 0; color: var(--text-dim); font-size: 9px; font-weight: 400; letter-spacing: .4em; text-transform: uppercase; }
 .primary-nav { display: flex; gap: 30px; align-items: center; margin-left: clamp(12px, 4vw, 75px); }
@@ -171,7 +171,7 @@ button#end-trip, button#delete-route, .report-entry button:last-child { color: v
 @media (max-width: 820px) {
   .console-header { min-height: 94px; flex-wrap: wrap; gap: 12px 20px; padding: 14px 24px 0; }
   .brand { margin-right: auto; }
-  .logo-mark { width: 42px; height: 48px; }
+  .logo-mark { width: 110px; height: auto; }
   h1 { font-size: 20px; }
   .brand-sub { font-size: 8px; }
   .vehicle-shortcut { margin-left: 0; }
@@ -188,7 +188,7 @@ button#end-trip, button#delete-route, .report-entry button:last-child { color: v
 @media (max-width: 480px) {
   .console-header { padding: 12px 20px 0; gap: 10px 14px; }
   .brand { gap: 14px; }
-  .logo-mark { width: 34px; height: 42px; }
+  .logo-mark { width: 100px; height: auto; }
   h1 { font-size: 17px; letter-spacing: .32em; }
   .brand-sub { margin-top: 6px; font-size: 7px; letter-spacing: .32em; }
   .vehicle-shortcut { font-size: 11px; gap: 3px; }
