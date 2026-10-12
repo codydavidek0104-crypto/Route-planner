@@ -3,7 +3,7 @@
 const SCOPE = self.registration.scope;
 const CACHE_PREFIX = `d7-shell-${encodeURIComponent(new URL(SCOPE).pathname)}-`;
 // Bump this version whenever any shell file changes in a release.
-const CACHE_NAME = `${CACHE_PREFIX}v19`;
+const CACHE_NAME = `${CACHE_PREFIX}v20`;
 const SHELL_FILES = [
   './', 'index.html', 'styles.css', 'map-theme.js', 'app.js', 'manifest.webmanifest',
   'favicon.svg', 'favicon-32.png', 'favicon.ico',
@@ -16,8 +16,10 @@ const SHELL_URLS = SHELL_FILES.map(file => new URL(file, SCOPE).href);
 self.addEventListener('install', event => {
   // All-or-nothing installation. Leave the previous shell usable if this fails.
   event.waitUntil(caches.open(CACHE_NAME).then(cache =>
-    cache.addAll(SHELL_URLS.map(url => new Request(url, { cache: 'reload' })))));
-  // Do not skipWaiting: an open app must keep one consistent shell version.
+    cache.addAll(SHELL_URLS.map(url => new Request(url, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
+  // This branding-only release keeps app.js unchanged. Activate after the complete
+  // shell is cached so open tabs can load the accepted logo on their next reload.
 });
 
 self.addEventListener('activate', event => {

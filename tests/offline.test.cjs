@@ -7,7 +7,7 @@ const vm = require('node:vm');
 function worker({ installFails = false, networkFails = false } = {}) {
   const scope = 'https://example.test/Route-planner/';
   const events = {}, entries = new Map(), removed = [], fetched = [];
-  let claims = 0;
+  let claims = 0, activations = 0;
   const cache = {
     async addAll(urls) {
       if (installFails) throw new Error('Download failed');
@@ -20,6 +20,7 @@ function worker({ installFails = false, networkFails = false } = {}) {
   };
   const context = vm.createContext({ URL, Request,
     self: { registration: { scope },
+      async skipWaiting() { activations++; },
       addEventListener: (name, fn) => { events[name] = fn; },
       clients: { async claim() { claims++; } },
     },
@@ -48,7 +49,7 @@ function worker({ installFails = false, networkFails = false } = {}) {
     events.fetch({ request: { url, method }, respondWith(promise) { task = promise; } });
     return task;
   }
-  return { scope, entries, removed, fetched, lifecycle, request, get claims() { return claims; } };
+  return { scope, entries, removed, fetched, lifecycle, request, get claims() { return claims; }, get activations() { return activations; } };
 }
 
 test('the installed shell reopens at the Pages subpath with no network', async () => {
@@ -86,5 +87,6 @@ test('failed precaching rejects installation rather than claiming offline readin
   const w = worker({ installFails: true });
   await assert.rejects(w.lifecycle('install'), /Download failed/);
   assert.equal(w.claims, 0);
+  assert.equal(w.activations, 0);
   assert.equal(w.entries.size, 0);
 });

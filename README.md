@@ -38,7 +38,7 @@ After one successful online visit over HTTPS (or localhost), the service worker 
 
 Maps, autocomplete, planning and external navigation require internet. Offline status is visible and planning is blocked when the browser reports it is offline. A failed cache installation reports that offline setup could not finish. Storage still belongs to this browser/device: private browsing, site-data deletion and storage eviction can remove it.
 
-The worker uses cache-first responses for a consistent shell release, does not force a waiting update into open tabs, and removes only obsolete caches for this app's scope. Close all D7 tabs/windows and reopen to apply an available update. **Bump `CACHE_NAME` in `service-worker.js` whenever a shell file changes in a release.** Keep the manifest scope, start URL, script and stylesheet URLs relative for the `/Route-planner/` Pages path.
+The worker uses cache-first responses for a consistent shell release, activates this branding-only release after its complete shell is cached, and removes only obsolete caches for this app's scope. Reload an open tab to apply this branding-only shell update. No customer localStorage is cleared. **Bump `CACHE_NAME` in `service-worker.js` whenever a shell file changes in a release.** Keep the manifest scope, start URL, script and stylesheet URLs relative for the `/Route-planner/` Pages path.
 
 ## Saved-route backups
 
