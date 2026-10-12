@@ -588,7 +588,7 @@
   </script>
 <script
   async
-  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDlsd2EZo4MxLunslRRMm-Xuy_Y0g6yEYM&libraries=places&callback=initMap">
+  src="https://maps.googleapis.com/maps/api/js?key=REDACTED_BROWSER_MAPS_KEY&libraries=places&callback=initMap">
 </script>
 </body>
 </html>
