@@ -220,5 +220,6 @@ test('the accepted raster alpha and header backing are transparent without recol
   assert.ok(transparent>mark.width*mark.height*.5,'the raster must have transparent surroundings');
   const style=css.match(/\.logo-mark\s*\{[^}]*\}/)[0];
   assert.match(style,/background:\s*transparent/);
-  assert.doesNotMatch(style,/filter|background:\s*#fff/);
+  assert.match(style,/filter:\s*drop-shadow\(0 0 \.7px #c2c6ca\)/);
+  assert.doesNotMatch(style,/brightness|invert|hue-rotate|sepia|contrast|saturate|background:\s*#fff/);
 });
