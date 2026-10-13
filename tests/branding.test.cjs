@@ -211,3 +211,14 @@ test('the header and installed assets use only the approved D7 mark while preser
   assert.doesNotMatch(html, /src="icons\/d7-logo-original\.png"/);
   assert.match(html, /<p class="brand-sub">D7 Marketing<\/p>/);
 });
+test('the accepted raster alpha and header backing are transparent without recoloring the mark',()=>{
+  const mark=pngPixels(path.join(root,'icons/d7-mark-only.png'));
+  assert.equal(mark.channels,4);
+  assert.equal(mark.pixels[3],0,'top-left corner is transparent');
+  assert.equal(mark.pixels[mark.pixels.length-1],0,'bottom-right corner is transparent');
+  let transparent=0;for(let i=3;i<mark.pixels.length;i+=4)if(mark.pixels[i]===0)transparent++;
+  assert.ok(transparent>mark.width*mark.height*.5,'the raster must have transparent surroundings');
+  const style=css.match(/\.logo-mark\s*\{[^}]*\}/)[0];
+  assert.match(style,/background:\s*transparent/);
+  assert.doesNotMatch(style,/filter|background:\s*#fff/);
+});

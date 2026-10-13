@@ -29,7 +29,7 @@ button { min-height: 44px; cursor: pointer; }
 .skip-link:focus { transform: translateY(10px); }
 .console-header { display: flex; align-items: center; gap: 42px; min-height: 86px; padding: 12px 40px; border-bottom: 1px solid #262b2f; }
 .brand { display: flex; align-items: center; gap: 24px; min-height: 44px; flex: 0 0 auto; text-decoration: none; }
-.logo-mark { display: block; width: 64px; height: 64px; object-fit: contain; background: #fff; }
+.logo-mark { display: block; width: 64px; height: 64px; object-fit: contain; background: transparent; }
 h1 { margin: 0; font-size: 23px; font-weight: 500; letter-spacing: .36em; line-height: 1.2; text-transform: uppercase; }
 .brand-sub { margin: 7px 0 0; color: var(--text-dim); font-size: 9px; font-weight: 400; letter-spacing: .4em; text-transform: uppercase; }
 .primary-nav { display: flex; gap: 30px; align-items: center; margin-left: clamp(12px, 4vw, 75px); }
