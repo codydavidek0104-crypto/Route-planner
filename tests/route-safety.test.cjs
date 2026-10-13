@@ -1749,3 +1749,13 @@ test('provider route-length limits split internally while retaining every stop a
   const route=JSON.parse(a.stored.d7TripProgress).routeSnapshot;assert.deepEqual(route.stops,names);assert.equal(route.legs.length,27);
   for(let j=1;j<route.legs.length;j++)assert.equal(route.legs[j-1].to,route.legs[j].from);
 });
+
+test('repeat import of the same selection retains manual revisions instead of replacing or appending again',async()=>{
+  const a=setup();const csv='Store #,Address\nA,12 Oak St\nB,30 Main St';
+  a.el('spreadsheet-file').files=[{name:'job.csv',size:csv.length,text:async()=>csv}];await a.el('spreadsheet-file').listeners.change();
+  a.el('spreadsheet-mode').value='replace';a.click('apply-spreadsheet');
+  a.el('stops-container').children[1].children[3].children[1].click();
+  a.click('apply-spreadsheet');assert.equal(a.el('stops-container').children.length,2);
+  assert.equal(a.el('stops-container').children[0].children[1].value,'30 Main St');
+  assert.match(a.el('spreadsheet-message').textContent,/already loaded/);
+});

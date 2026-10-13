@@ -134,7 +134,7 @@
       const label=value(row,'label').slice(0,128);
       let issue='';
       if(!(fields.address>=0 ? value(row,'address') : value(row,'street')))issue='Missing address/street';
-      else if(!/[A-Za-z\u00C0-\uFFFF]/.test(address) || address.length>512 || /^=/.test(address) || /^#(?:REF!|VALUE!|DIV\/0!|N\/A|NAME\?|NUM!|NULL!)$/i.test(address))issue='Unusable address';
+      else if(!/[A-Za-z\u00C0-\uFFFF]/.test(value(row,fields.address>=0?'address':'street')) || address.length>512 || /^=/.test(address) || /^#(?:REF!|VALUE!|DIV\/0!|N\/A|NAME\?|NUM!|NULL!)$/i.test(address))issue='Unusable address';
       const firstValue=value(row,'first');
       if(!issue && firstValue && !/^(yes|y|true|1|first|high|no|n|false|0|normal|low)$/i.test(firstValue))issue='Unrecognized First value; choose a yes/no column or Not used';
       const duplicate=seen.has(address.toLowerCase());seen.add(address.toLowerCase());

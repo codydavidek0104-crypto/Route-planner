@@ -1234,7 +1234,7 @@
     });
     updatePrioritySummary();
 
-    let importSheets = [], importRecords = [], importGeneration = 0;
+    let importSheets = [], importRecords = [], importGeneration = 0, appliedImport = null;
     const importFile = document.getElementById("spreadsheet-file");
     const importMessage = document.getElementById("spreadsheet-message");
     const importPreview = document.getElementById("spreadsheet-preview");
@@ -1320,10 +1320,17 @@
     function applySpreadsheet(plan) {
       if(tripProgress){importMessage.textContent="Finish or end the active trip before importing a new draft.";return;}
       const selected=importSelected();const replace=document.getElementById("spreadsheet-mode").value==="replace";
+      const signature=JSON.stringify([importGeneration,replace,selected.map(row=>[row.row,row.address,row.label,row.first])]);
+      if(signature===appliedImport) {
+        importMessage.textContent="These rows are already loaded. Plan Route uses your current draft and revisions. Select a new file or change the row selection to import again.";
+        if(plan)planRoute(true);
+        return;
+      }
       if(!selected.length || selected.length+(replace?0:stops.length)>MAX_STOPS){importMessage.textContent=`Select between 1 and ${MAX_STOPS} stops in total.`;return;}
       invalidateRoute();
       if(replace){stops.splice(0);stopLabels.splice(0);stopFirst.splice(0);}
       for(const record of selected){stops.push(record.address);stopLabels.push(record.label);stopFirst.push(record.first);}
+      appliedImport=signature;
       renderStops();updateImportCount();document.getElementById("job-spreadsheet-details").open=false;
       importMessage.textContent=`Imported ${selected.length} stops into the draft. Start, Finish and saved routes were kept. Set any priorities, then Plan Route.`;
       if(plan)planRoute(true);

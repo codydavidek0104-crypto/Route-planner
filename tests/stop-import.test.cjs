@@ -59,3 +59,8 @@ test('file size, file types and archive expansion are checked before workbook pa
   view.setUint32(46,0x06054b50,true);view.setUint16(56,1,true);
   assert.throws(()=>Import.checkZip(bytes),/64 MB/);
 });
+
+test('a numeric-only street is unusable even when locality fields contain text',()=>{
+  const rows=[['Street','City','State'],['12345','Sample City','MA']];const detected=Import.detect(rows);
+  assert.equal(Import.preview(rows,detected.row,true,detected.fields)[0].valid,false);
+});
