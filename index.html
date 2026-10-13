@@ -67,7 +67,7 @@
                   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
                 </button>
               </div>
-              <p id="stop-counter" class="stop-counter" aria-live="polite">0 of 20 stops between start and destination</p>
+              <p id="stop-counter" class="stop-counter" aria-live="polite">0 of 500 stops between start and destination</p>
             </div>
 
             <div class="field route-step destination-step">
@@ -76,6 +76,45 @@
               <input id="destination" type="text" placeholder="Enter final destination" autocomplete="off">
             </div>
           </div>
+          <details id="job-spreadsheet-details" class="spreadsheet-import">
+            <summary>Upload a job spreadsheet</summary>
+            <p class="hint">XLSX, CSV or TSV · up to 500 stops. File parsing stays on this device. Start and Finish stay separate; use the same address for both to return to your depot.</p>
+            <label for="spreadsheet-file">Job spreadsheet</label>
+            <input id="spreadsheet-file" type="file" accept=".xlsx,.csv,.tsv">
+            <p id="spreadsheet-message" class="hint" role="status" aria-live="polite"></p>
+            <div id="spreadsheet-review" hidden>
+              <label for="spreadsheet-sheet">Sheet</label><select id="spreadsheet-sheet"></select>
+              <label for="spreadsheet-header-row">First row of table</label><input id="spreadsheet-header-row" type="number" min="1" max="50" value="1">
+              <label class="location-option"><input id="spreadsheet-has-header" type="checkbox" checked> This row contains column names</label>
+              <details><summary>Review address columns</summary>
+                <p class="hint">Use either a complete address column or street plus locality columns. Store labels are kept separately and are not sent as part of the address. A First column accepts yes/no, true/false, 1/0 or high/normal.</p>
+                <div class="import-columns">
+                  <div><label for="column-address">Complete address</label><select id="column-address"></select></div>
+                  <div><label for="column-street">Street</label><select id="column-street"></select></div>
+                  <div><label for="column-city">City</label><select id="column-city"></select></div>
+                  <div><label for="column-state">State / province</label><select id="column-state"></select></div>
+                  <div><label for="column-postal">ZIP / postal code</label><select id="column-postal"></select></div>
+                  <div><label for="column-country">Country</label><select id="column-country"></select></div>
+                  <div><label for="column-label">Store / business label</label><select id="column-label"></select></div>
+                  <div><label for="column-first">Must do first column</label><select id="column-first"></select></div>
+                </div>
+              </details>
+              <div class="import-table-wrap" tabindex="0" aria-label="Spreadsheet row preview">
+                <table class="import-table"><thead><tr><th>Use</th><th>Row</th><th>Store</th><th>Address</th><th>Priority</th><th>Review</th></tr></thead><tbody id="spreadsheet-preview"></tbody></table>
+              </div>
+              <label for="spreadsheet-mode">Add selected rows to</label><select id="spreadsheet-mode"><option value="replace">Replace draft stops</option><option value="append">Append to draft stops</option></select>
+              <p id="import-count" class="hint" aria-live="polite"></p>
+              <div class="actions"><button id="import-optimize" class="btn optimize-button" type="button" disabled>Import &amp; Plan Route</button><button id="apply-spreadsheet" class="btn" type="button" disabled>Use stops only</button></div>
+            </div>
+          </details>
+          <details class="route-priorities">
+            <summary>Route instructions (optional)</summary>
+            <label for="route-instructions">Route instructions (optional)</label>
+            <textarea id="route-instructions" maxlength="512" placeholder="Leave blank to reduce driving"></textarea>
+            <input id="route-priority" type="hidden" value="efficiency"><input id="northern-cutoff" type="hidden" value="40">
+            <p class="hint">Supported instructions: “first stops: 2, 5”, “north first”, “south first”, “north cutoff: 42”. Separate rules with semicolons. Default: reduce driving, no regional preference. North/south use a latitude boundary (40 by default), not a weather forecast. Unknown instructions block planning rather than being ignored. Individual First checkboxes also apply. Move arrows set a manual order; Keep My Order preserves it.</p>
+          </details>
+          <p id="priority-summary" class="hint" aria-live="polite"></p>
           </div>
 
           <details id="fuel-settings" class="fuel-inline" open>
@@ -99,11 +138,11 @@
           <div id="planner-actions">
           <div class="actions">
             <button id="plan-route" class="btn action-button optimize-button" type="button" aria-describedby="plan-hint">
-              Optimize Route <span aria-hidden="true">→</span>
+              Plan Route <span aria-hidden="true">→</span>
             </button>
-            <button id="calculate-route" class="btn calculate-button" type="button" aria-describedby="plan-hint">Calculate Route</button>
+            <button id="calculate-route" class="btn calculate-button" type="button" aria-describedby="plan-hint">Keep My Order</button>
           </div>
-          <p id="plan-hint" class="plan-hint">Optimize finds an efficient stop order. Calculate keeps your order. Start and finish stay fixed.</p>
+          <p id="plan-hint" class="plan-hint">Plan Route aims to reduce driving and estimated fuel across all stops. Optional instructions take priority. Keep My Order preserves your revisions. Start and Finish stay fixed. Large lists show progress while planning.</p>
           </div>
 
           <div class="stat-grid" role="group" aria-label="Route totals">
@@ -185,6 +224,7 @@
           <p id="route-stale-warning" class="route-message is-warn" role="status" hidden>
             Addresses changed. Results are out of date. Plan the route again.
           </p>
+          <p id="route-order-note" class="hint" aria-live="polite"></p>
           <div id="navigation-results" hidden>
             <details class="itinerary-disclosure">
               <summary>Your route, in order</summary>
@@ -230,6 +270,8 @@
 
 
   <script src="map-theme.js"></script>
+  <script src="vendor/exceljs.min.js"></script>
+  <script src="stop-import.js"></script>
   <script src="app.js"></script>
 <script
   async

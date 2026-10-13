@@ -1,10 +1,11 @@
-    const MAX_STOPS = 20;
-    // Optimize the complete route before splitting navigation URLs. Directions
-    // supports 25 intermediate waypoints; keep the public 20-stop limit below it.
+    const MAX_STOPS = 500;
+    // Directions permits 25 intermediate waypoints per request. Larger routes
+    // share section endpoints; optimization keeps those boundaries fixed.
     const DIRECTIONS_WAYPOINT_LIMIT = 25;
     let map;
     let directionsService;
     let directionsRenderer;
+    let sectionRenderers = [];
     let routeMarkers = [];
     const MAPS_LOAD_TIMEOUT_MS = 15000;
     const ROUTE_REQUEST_TIMEOUT_MS = 20000;
@@ -88,6 +89,8 @@
 
 
     const stops = [];
+    const stopLabels = [];
+    const stopFirst = [];
 
     const stopInput = document.getElementById("stop-input");
     const addStopButton = document.getElementById("add-stop");
@@ -191,7 +194,7 @@
       points.forEach((address, index) => {
         const item = document.createElement("li");
         const label = index === 0 ? "Start" : index === points.length - 1 ? "Finish" : `Stop ${index}`;
-        item.textContent = `${label}: ${address}`;
+        item.textContent = `${label}: ${index > 0 && index < points.length - 1 && stopLabels[index - 1] ? stopLabels[index - 1] + " — " : ""}${address}`;
         itinerary.appendChild(item);
       });
       navigationControls.innerHTML = "";
@@ -227,7 +230,8 @@
       syncFuelDisclosure();
       const { addresses, index } = tripProgress;
       tripStopNumber.textContent = `Stop ${index + 1} of ${addresses.length}`;
-      tripStopAddress.textContent = addresses[index];
+      const label=tripProgress.routeSnapshot?.stopLabels?.[index];
+      tripStopAddress.textContent = (label ? label+" — " : "")+addresses[index];
       tripBackButton.disabled = index === 0;
       // A repeated arrival, including at the destination, replaces the earlier time.
       tripNextButton.disabled = false;
@@ -409,7 +413,8 @@
 
     function reportStopText(report, index) {
       const completed = report.completedAt[index];
-      return `${report.addresses[index]} — ${validTime(completed) ? timestampText(completed) :
+      const label=report.routeSnapshot?.stopLabels?.[index];
+      return `${label ? label+" — " : ""}${report.addresses[index]} — ${validTime(completed) ? timestampText(completed) :
         completed === COMPLETED_UNRECORDED ? "Completed (time not recorded)" : "Not completed"}`;
     }
 
@@ -609,9 +614,12 @@
       for (const marker of routeMarkers) marker.setMap(null);
       routeMarkers = [];
       if (directionsRenderer) directionsRenderer.setMap(null);
+      for (const renderer of sectionRenderers) renderer.setMap(null);
+      sectionRenderers = [];
       routeShown = false;
       navigationPoints = null;
       routePlan = null;
+      document.getElementById("route-order-note").textContent = "";
       navigationResults.hidden = true;
       navigationControls.innerHTML = "";
       routeMessage.textContent = "";
@@ -736,7 +744,7 @@
       stopInput.disabled = limitReached;
 
       if (limitReached) {
-        stopInput.placeholder = "Maximum of 20 stops reached";
+        stopInput.placeholder = `Maximum of ${MAX_STOPS} stops reached`;
       } else {
         stopInput.placeholder = "Add a stop address";
       }
@@ -749,6 +757,7 @@
         const stopItem = document.createElement("div");
         stopItem.className = "stop-item";
         stopItem.setAttribute("data-stop-number", index + 1);
+        stopItem.setAttribute("data-stop-caption", `Stop ${index + 1}${stopLabels[index] ? " · " + stopLabels[index] : ""}`);
 
         const stopNumber = document.createElement("span");
         stopNumber.className = "stop-number";
@@ -762,7 +771,7 @@
         stopAddress.textContent = address;
         stopAddress.placeholder = "Enter an address";
         stopAddress.autocomplete = "off";
-        stopAddress.ariaLabel = "Stop " + (index + 1);
+        stopAddress.ariaLabel = "Stop " + (index + 1) + (stopLabels[index] ? ": " + stopLabels[index] : "");
         stopAddress._stopIndex = index;
 
         stopAddress.addEventListener("input", () => {
@@ -784,7 +793,14 @@
         removeButton.setAttribute("aria-label", "Remove stop " + (index + 1));
 
         removeButton.addEventListener("click", () => {
+          try {
+            const parsed=D7Import.instructions(document.getElementById("route-instructions").value||"",MAX_STOPS);
+            if(parsed.first.length)document.getElementById("route-instructions").value=D7Import.instructionText({...parsed,first:parsed.first.filter(n=>n!==index+1).map(n=>n>index+1?n-1:n)});
+          } catch { /* Invalid text remains visible and will block planning. */ }
           stops.splice(index, 1);
+          stopLabels.splice(index, 1);
+          stopFirst.splice(index, 1);
+          updatePrioritySummary();
           invalidateRoute();
           renderStops();
           const nextRow = stopsContainer.children[Math.min(index, stops.length - 1)];
@@ -793,14 +809,50 @@
           routeMessage.textContent = "";
         });
 
+        const controls = document.createElement("div");
+        controls.className = "stop-order-controls";
+        const firstLabel = document.createElement("label");
+        const firstBox = document.createElement("input");
+        firstBox.type = "checkbox"; firstBox.checked = !!stopFirst[index];
+        firstBox.setAttribute("aria-label", `Do stop ${index+1} first`);
+        firstBox.addEventListener("change", () => {
+          stopFirst[index] = firstBox.checked;
+          if(!firstBox.checked)try {
+            const parsed=D7Import.instructions(document.getElementById("route-instructions").value||"",MAX_STOPS);
+            if(parsed.first.includes(index+1))document.getElementById("route-instructions").value=D7Import.instructionText({...parsed,first:parsed.first.filter(n=>n!==index+1)});
+          } catch { /* Invalid text remains visible. */ }
+          invalidateRoute(); updatePrioritySummary();
+        });
+        firstLabel.appendChild(firstBox);
+        const firstText = document.createElement("span"); firstText.textContent = "First";
+        firstLabel.appendChild(firstText); controls.appendChild(firstLabel);
+        for (const [direction, text] of [[-1,"↑"],[1,"↓"]]) {
+          const button = document.createElement("button"); button.type = "button";
+          button.textContent = text; button.disabled = index+direction<0 || index+direction>=stops.length;
+          button.setAttribute("aria-label", `Move stop ${index+1} ${direction<0 ? "up" : "down"}`);
+          button.addEventListener("click", () => {
+            const target = index+direction;
+            if(target<0 || target>=stops.length)return;
+            let parsed;try { parsed=D7Import.instructions(document.getElementById("route-instructions").value||"",MAX_STOPS); } catch { parsed={priority:"efficiency",cutoff:40,first:[]}; }
+            const instructed=stops.map((_,i)=>parsed.first.includes(i+1));
+            [instructed[index],instructed[target]]=[instructed[target],instructed[index]];
+            if(parsed.first.length)document.getElementById("route-instructions").value=D7Import.instructionText({...parsed,first:instructed.map((v,i)=>v?i+1:null).filter(Boolean)});
+            for(const items of [stops,stopLabels,stopFirst]) [items[index],items[target]]=[items[target],items[index]];
+            invalidateRoute();renderStops();
+            routeMessage.textContent = "Stop order changed. Keep My Order preserves this order; Plan Route applies your priorities.";
+          });
+          controls.appendChild(button);
+        }
         stopItem.appendChild(stopNumber);
         stopItem.appendChild(stopAddress);
         stopItem.appendChild(removeButton);
+        stopItem.appendChild(controls);
 
         stopsContainer.appendChild(stopItem);
       });
 
       updateStopCounter();
+      updatePrioritySummary();
     }
 
     function addStop() {
@@ -815,11 +867,13 @@
 
       if (stops.length >= MAX_STOPS) {
         routeMessage.textContent =
-          "You have reached the 20-stop limit.";
+          `You have reached the ${MAX_STOPS}-stop limit.`;
         return;
       }
 
       stops.push(address);
+      stopLabels.push("");
+      stopFirst.push(false);
       invalidateRoute();
 
       stopInput.value = "";
@@ -888,7 +942,34 @@
         }
         const legacy = !Object.prototype.hasOwnProperty.call(route, "start");
         if (route.stops.length > MAX_STOPS + (legacy ? 1 : 0)) {
-          throw new Error("A route can contain up to 20 stops between start and finish.");
+          throw new Error(`A route can contain up to ${MAX_STOPS} stops between start and finish.`);
+        }
+        let labels = null;
+        if (route.stopLabels != null) {
+          if (!Array.isArray(route.stopLabels) || route.stopLabels.length !== route.stops.length ||
+              route.stopLabels.some(label => typeof label !== "string" || label.length > 128)) {
+            throw new Error("Store labels must match the stops and contain at most 128 characters each.");
+          }
+          labels = [...route.stopLabels];
+          if (legacy) labels.shift();
+        }
+        const preferences = {};
+        if (route.stopFirst != null) {
+          if(!Array.isArray(route.stopFirst) || route.stopFirst.length!==route.stops.length || route.stopFirst.some(v=>typeof v!=="boolean"))
+            throw new Error("First-stop flags must match the stops.");
+          preferences.stopFirst = legacy ? route.stopFirst.slice(1) : [...route.stopFirst];
+        }
+        if(route.routeInstructions != null) {
+          D7Import.instructions(route.routeInstructions, route.stops.length);preferences.routeInstructions=route.routeInstructions;
+        }
+        if(route.routePriority != null) {
+          if(!["efficiency","north","south"].includes(route.routePriority))throw new Error("Unknown route priority.");
+          preferences.routePriority=route.routePriority;
+        }
+        if(route.northernCutoff != null) {
+          const cutoff=Number(route.northernCutoff);
+          if(!Number.isFinite(cutoff) || cutoff < -90 || cutoff > 90)throw new Error("Invalid northern cutoff.");
+          preferences.northernCutoff=String(cutoff);
         }
         const addresses = route.stops.map(backupAddress);
         const start = legacy ? backupAddress(addresses.shift()) : backupAddress(route.start);
@@ -900,7 +981,7 @@
           return String(raw);
         };
         routes[name] = {
-          start, stops: addresses, destination: backupAddress(route.destination),
+          start, stops: addresses, ...(labels ? { stopLabels: labels } : {}), ...preferences, destination: backupAddress(route.destination),
           vehicleMpg: fuel(route.vehicleMpg, "15"), fuelPrice: fuel(route.fuelPrice, "4.50"),
         };
       }
@@ -1017,6 +1098,8 @@
         return;
       }
 
+      try { D7Import.instructions(document.getElementById("route-instructions").value || "", stops.length); }
+      catch(error) { routeMessage.textContent=error.message; return; }
       const savedRoutes = getSavedRoutes();
       if (Object.prototype.hasOwnProperty.call(savedRoutes, name) &&
         !window.confirm(`Replace the saved route “${name}”?`)) {
@@ -1027,6 +1110,13 @@
       savedRoutes[name] = {
         start,
         stops: [...stops],
+        ...(stopLabels.some(Boolean) ? { stopLabels: [...stopLabels] } : {}),
+        ...(stopFirst.some(Boolean) ? { stopFirst: [...stopFirst] } : {}),
+        ...(document.getElementById("route-instructions").value.trim() ? { routeInstructions: document.getElementById("route-instructions").value.trim() } : {}),
+        ...((document.getElementById("route-priority").value || "efficiency") !== "efficiency" ? {
+          routePriority: document.getElementById("route-priority").value,
+          northernCutoff: document.getElementById("northern-cutoff").value || "40"
+        } : {}),
         destination,
         vehicleMpg: vehicleMpgInput.value,
         fuelPrice: fuelPriceInput.value
@@ -1052,7 +1142,6 @@
         return;
       }
 
-      invalidateRoute();
       const savedStops = Array.isArray(savedRoute.stops) ? savedRoute.stops : [];
       let start;
       let loadedStops;
@@ -1064,12 +1153,24 @@
         start = String(savedStops[0] || "").trim();
         loadedStops = savedStops.slice(1);
       }
+      if (loadedStops.length > MAX_STOPS) {
+        routeMessage.textContent = `This saved route has more than ${MAX_STOPS} stops. Its saved record has been kept unchanged.`;
+        return;
+      }
+      invalidateRoute();
       startInput.value = start;
       stops.splice(
         0,
         stops.length,
-        ...loadedStops.slice(0, MAX_STOPS).map((stop) => String(stop))
+        ...loadedStops.map((stop) => String(stop))
       );
+      const labels = Array.isArray(savedRoute.stopLabels) ? savedRoute.stopLabels : [];
+      stopLabels.splice(0, stopLabels.length, ...loadedStops.map((_, i) => String(labels[i + (savedRoute.start ? 0 : 1)] || "").slice(0, 128)));
+      stopFirst.splice(0,stopFirst.length,...loadedStops.map((_,i)=>!!(savedRoute.stopFirst||[])[i+(savedRoute.start?0:1)]));
+      document.getElementById("route-priority").value = ["north","south"].includes(savedRoute.routePriority) ? savedRoute.routePriority : "efficiency";
+      document.getElementById("northern-cutoff").value = String(savedRoute.northernCutoff ?? "40");
+      document.getElementById("route-instructions").value = savedRoute.routeInstructions || (savedRoute.routePriority && savedRoute.routePriority!=="efficiency" ? savedRoute.routePriority+" first; north cutoff: "+(savedRoute.northernCutoff||40) : "");
+      updatePrioritySummary();
       destinationInput.value = savedRoute.destination || "";
       vehicleMpgInput.value = savedRoute.vehicleMpg || "15";
       fuelPriceInput.value = savedRoute.fuelPrice || "4.50";
@@ -1078,7 +1179,7 @@
       showView("plan", true);
 
       routeMessage.textContent =
-        "Route loaded: " + name + ". Choose Optimize Route or Calculate Route.";
+        "Route loaded: " + name + ". Choose Plan Route or Keep My Order.";
     });
 
     deleteRouteButton.addEventListener("click", () => {
@@ -1111,6 +1212,125 @@
 
     updateSavedRouteOptions();
 
+    function updatePrioritySummary() {
+      let priority = document.getElementById("route-priority").value || "efficiency";
+      let cutoff = document.getElementById("northern-cutoff").value || "40";
+      let parsed;
+      try { parsed = D7Import.instructions(document.getElementById("route-instructions").value || "", MAX_STOPS); }
+      catch(error) { document.getElementById("priority-summary").textContent=error.message; return; }
+      document.getElementById("route-priority").value=parsed.priority;
+      document.getElementById("northern-cutoff").value=String(parsed.cutoff);
+      priority=parsed.priority;cutoff=String(parsed.cutoff);
+      for(let i=0;i<stops.length;i++) {
+        const box=stopsContainer.children[i]?.children[3]?.children[0]?.children[0];
+        if(box)box.checked=!!stopFirst[i] || parsed.first.includes(i+1);
+      }
+      const count = stops.filter((_,i)=>stopFirst[i] || parsed.first.includes(i+1)).length;
+      document.getElementById("priority-summary").textContent =
+        `${parsed.first.length ? "Do stops " + parsed.first.join(", ") + " first; " : count ? count + " selected stops first; " : ""}${priority==="north" ? "stops at or above latitude " + cutoff + " before southern stops" : priority==="south" ? "stops below latitude " + cutoff + " before northern stops" : "reduce driving across the full list"}. Plan Route applies these rules. Keep My Order ignores priority rules and preserves your exact entered order.`;
+    }
+    for(const id of ["route-instructions"]) document.getElementById(id).addEventListener("input",()=>{
+      invalidateRoute();updatePrioritySummary();
+    });
+    updatePrioritySummary();
+
+    let importSheets = [], importRecords = [], importGeneration = 0;
+    const importFile = document.getElementById("spreadsheet-file");
+    const importMessage = document.getElementById("spreadsheet-message");
+    const importPreview = document.getElementById("spreadsheet-preview");
+    function importSelected() {
+      return importRecords.filter((row,i)=>row.valid && document.getElementById("import-row-"+i)?.checked);
+    }
+    function updateImportCount() {
+      const rows=importSelected();
+      const mode=document.getElementById("spreadsheet-mode").value;
+      const total=rows.length+(mode==="replace"?0:stops.length);
+      document.getElementById("import-count").textContent = `${rows.length} rows selected · ${total} intermediate stops after import (maximum ${MAX_STOPS}).`;
+      for(const id of ["apply-spreadsheet","import-optimize"])document.getElementById(id).disabled=!rows.length || total>MAX_STOPS;
+    }
+    function previewSpreadsheet(resetMapping=false) {
+      const sheet=importSheets[Number(document.getElementById("spreadsheet-sheet").value)||0];
+      if(!sheet)return;
+      const row=Math.max(0,Math.min(49,Number(document.getElementById("spreadsheet-header-row").value||1)-1));
+      const hasHeaders=document.getElementById("spreadsheet-has-header").checked;
+      const headers=sheet.rows[row]||[];
+      const width=Math.max(headers.length,...sheet.rows.slice(row,row+10).map(r=>r.length));
+      if(resetMapping) {
+        const detected=hasHeaders ? D7Import.mapping(headers) : {...D7Import.mapping([]),address:0};
+        for(const field of ["address","street","city","state","postal","country","label","first"]) {
+          const select=document.getElementById("column-"+field); select.innerHTML="";
+          const none=document.createElement("option");none.value="-1";none.textContent="Not used";select.appendChild(none);
+          for(let i=0;i<width;i++) {
+            const option=document.createElement("option");option.value=String(i);
+            option.textContent=(hasHeaders?String(headers[i]||""):"")||`Column ${i+1}`;select.appendChild(option);
+          }
+          select.value=String(detected[field]);
+        }
+      }
+      const fields={};
+      for(const field of ["address","street","city","state","postal","country","label","first"])fields[field]=Number(document.getElementById("column-"+field).value);
+      importRecords=D7Import.preview(sheet.rows,row,hasHeaders,fields);
+      importPreview.innerHTML="";
+      importRecords.forEach((record,i)=>{
+        const tr=document.createElement("tr");const include=document.createElement("td");
+        const checkbox=document.createElement("input");checkbox.type="checkbox";checkbox.id="import-row-"+i;
+        checkbox.checked=record.valid;checkbox.disabled=!record.valid;checkbox.setAttribute("aria-label",`Include spreadsheet row ${record.row}`);
+        checkbox.addEventListener("change",updateImportCount);include.appendChild(checkbox);tr.appendChild(include);
+        for(const text of [String(record.row),record.label,record.address,record.first?"First":"",record.issue]){
+          const td=document.createElement("td");td.textContent=text;tr.appendChild(td);
+        }
+        importPreview.appendChild(tr);
+      });
+      const invalid=importRecords.filter(r=>!r.valid).length;
+      importMessage.textContent=`${importRecords.length} nonempty rows; ${invalid} unusable rows excluded. Review the columns and selected rows. Addresses are checked for usable text here; Google resolves them when you plan.`;
+      updateImportCount();
+    }
+    function selectSheet() {
+      const sheet=importSheets[Number(document.getElementById("spreadsheet-sheet").value)||0];
+      const detected=D7Import.detect(sheet.rows);
+      document.getElementById("spreadsheet-header-row").value=String(detected.row+1);
+      document.getElementById("spreadsheet-has-header").checked=detected.hasHeaders;
+      previewSpreadsheet(true);
+    }
+    importFile.addEventListener("change",async()=>{
+      const generation=++importGeneration;
+      const file=importFile.files && importFile.files[0];if(!file)return;
+      invalidateRoute();document.getElementById("route-instructions").value="";updatePrioritySummary();
+      importRecords=[];document.getElementById("spreadsheet-review").hidden=true;
+      importMessage.textContent="Reading spreadsheet on this device...";
+      try {
+        const sheets=await D7Import.readFile(file,typeof ExcelJS!=="undefined"?ExcelJS:null);
+        if(generation!==importGeneration)return;
+        if(!sheets.length)throw new Error("No readable sheets were found.");
+        importSheets=sheets;
+        const select=document.getElementById("spreadsheet-sheet");select.innerHTML="";
+        sheets.forEach((sheet,i)=>{const option=document.createElement("option");option.value=String(i);option.textContent=sheet.name;select.appendChild(option);});
+        // Choose the first sheet with recognizable address columns, not a cover sheet.
+        const preferred=sheets.findIndex(sheet=>D7Import.detect(sheet.rows).hasHeaders);
+        select.value=String(preferred<0?0:preferred);
+        document.getElementById("spreadsheet-review").hidden=false;selectSheet();
+      } catch(error) {
+        if(generation===importGeneration)importMessage.textContent="Could not read spreadsheet. "+error.message;
+      }
+    });
+    document.getElementById("spreadsheet-sheet").addEventListener("change",selectSheet);
+    for(const id of ["spreadsheet-header-row","spreadsheet-has-header"])document.getElementById(id).addEventListener("change",()=>previewSpreadsheet(true));
+    for(const field of ["address","street","city","state","postal","country","label","first"])document.getElementById("column-"+field).addEventListener("change",()=>previewSpreadsheet());
+    document.getElementById("spreadsheet-mode").addEventListener("change",updateImportCount);
+    function applySpreadsheet(plan) {
+      if(tripProgress){importMessage.textContent="Finish or end the active trip before importing a new draft.";return;}
+      const selected=importSelected();const replace=document.getElementById("spreadsheet-mode").value==="replace";
+      if(!selected.length || selected.length+(replace?0:stops.length)>MAX_STOPS){importMessage.textContent=`Select between 1 and ${MAX_STOPS} stops in total.`;return;}
+      invalidateRoute();
+      if(replace){stops.splice(0);stopLabels.splice(0);stopFirst.splice(0);}
+      for(const record of selected){stops.push(record.address);stopLabels.push(record.label);stopFirst.push(record.first);}
+      renderStops();updateImportCount();document.getElementById("job-spreadsheet-details").open=false;
+      importMessage.textContent=`Imported ${selected.length} stops into the draft. Start, Finish and saved routes were kept. Set any priorities, then Plan Route.`;
+      if(plan)planRoute(true);
+    }
+    document.getElementById("apply-spreadsheet").addEventListener("click",()=>applySpreadsheet(false));
+    document.getElementById("import-optimize").addEventListener("click",()=>applySpreadsheet(true));
+
     function planRoute(optimize) {
       // A typed but unadded stop must never be silently left out of the plan.
       if (stopInput.value.trim()) {
@@ -1122,6 +1342,57 @@
     }
     planButton.addEventListener("click", () => planRoute(true));
     document.getElementById("calculate-route").addEventListener("click", () => planRoute(false));
+
+    // A full-list heuristic, not a claim of shortest driving distance. Initial
+    // Directions legs provide coordinates using the existing enabled service.
+    function geographicStopOrder(legs, firstFlags = [], priority = "efficiency", cutoff = 40) {
+      function coordinate(location) {
+        if (!location) return null;
+        const lat = typeof location.lat === "function" ? location.lat() : location.lat;
+        const lng = typeof location.lng === "function" ? location.lng() : location.lng;
+        return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+          ? { lat: lat * Math.PI / 180, lng: lng * Math.PI / 180 } : null;
+      }
+      const points = [coordinate(legs[0].start_location), ...legs.map(leg => coordinate(leg.end_location))];
+      if (points.some(point => !point)) return null;
+      const distance = (a, b) => {
+        const x = points[a], y = points[b];
+        const v = Math.sin((x.lat-y.lat)/2)**2 + Math.cos(x.lat)*Math.cos(y.lat)*Math.sin((x.lng-y.lng)/2)**2;
+        return 2 * Math.asin(Math.sqrt(Math.min(1, Math.max(0, v))));
+      };
+      const tier = index => firstFlags[index-1] ? 0 : priority === "north"
+        ? (points[index].lat*180/Math.PI >= cutoff ? 1:2)
+        : priority === "south" ? (points[index].lat*180/Math.PI < cutoff ? 1:2) : 1;
+      const remaining = new Set(Array.from({ length: points.length-2 }, (_, i) => i+1));
+      const order = [0];
+      while (remaining.size) {
+        let closest, best = Infinity;
+        const nextTier = Math.min(...[...remaining].map(tier));
+        for (const candidate of remaining) {
+          if(tier(candidate)!==nextTier)continue;
+          const cost = distance(order[order.length-1], candidate);
+          if (cost < best) { closest = candidate; best = cost; }
+        }
+        remaining.delete(closest); order.push(closest);
+      }
+      order.push(points.length-1);
+      // Bounded 2-opt improvement keeps both endpoints fixed.
+      for (let pass = 0; pass < 4; pass++) {
+        let changed = false;
+        for (let i = 1; i < order.length-2; i++) {
+          for (let j = i+1; j < order.length-1; j++) {
+            if(tier(order[i])!==tier(order[j]))break;
+            const old = distance(order[i-1],order[i]) + distance(order[j],order[j+1]);
+            const next = distance(order[i-1],order[j]) + distance(order[i],order[j+1]);
+            if (next + 1e-12 < old) {
+              order.splice(i,j-i+1,...order.slice(i,j+1).reverse()); changed = true;
+            }
+          }
+        }
+        if (!changed) break;
+      }
+      return { indices: order.slice(1,-1).map(index => index-1), tiers: firstFlags.map((_,i)=>tier(i+1)) };
+    }
 
     function calculateRoute(optimize = false) {
       pendingRouteOptimize = optimize;
@@ -1149,8 +1420,8 @@
         return;
       }
 
-      if (stops.length > MAX_STOPS || stops.length > DIRECTIONS_WAYPOINT_LIMIT) {
-        routeMessage.textContent = "You have reached the 20-stop limit.";
+      if (stops.length > MAX_STOPS) {
+        routeMessage.textContent = `You have reached the ${MAX_STOPS}-stop limit.`;
         return;
       }
 
@@ -1169,110 +1440,235 @@
         return;
       }
 
-      const requestedStops = stops.map((address) => String(address));
-      const waypoints = requestedStops.map((address) => ({
-        location: address.trim(),
-        stopover: true
-      }));
-
-      routeMessage.textContent = optimize
-        ? "Optimizing route..."
-        : "Calculating route...";
-
-      routeRequestPending = true;
-      const routeTimeout = setTimeout(() => {
-        if (requestId !== routeRequestId) return;
-        // Bump the ID so a late response is ignored.
-        routeRequestId += 1;
-        routeRequestPending = false;
-        routeMessage.textContent = "Route request timed out. Please try again.";
-      }, ROUTE_REQUEST_TIMEOUT_MS);
-      directionsService.route(
-        {
-          origin: origin,
-          destination: destination,
-          waypoints: waypoints,
-          optimizeWaypoints: optimize,
-          travelMode: google.maps.TravelMode.DRIVING
-        },
-        (result, status) => {
-          clearTimeout(routeTimeout);
-          if (requestId !== routeRequestId) return;
-          routeRequestPending = false;
-          if (JSON.stringify(stops) !== JSON.stringify(requestedStops) ||
-            destinationInput.value.trim() !== destination ||
-            startInput.value.trim() !== origin) {
-            invalidateRoute();
-            routeStaleWarning.hidden = false;
-            return;
+      const requestedStops = stops.map(address => String(address));
+      const requestedLabels = requestedStops.map((_, i) => stopLabels[i] || "");
+      let parsedInstructions;
+      try { parsedInstructions = D7Import.instructions(document.getElementById("route-instructions").value || "", requestedStops.length); }
+      catch(error) { routeMessage.textContent = error.message; document.getElementById("route-instructions").focus(); return; }
+      document.getElementById("route-priority").value = parsedInstructions.priority;
+      document.getElementById("northern-cutoff").value = String(parsedInstructions.cutoff);
+      const requestedFirst = requestedStops.map((_,i)=>!!stopFirst[i] || parsedInstructions.first.includes(i+1));
+      const priority = document.getElementById("route-priority").value || "efficiency";
+      const cutoff = Number(document.getElementById("northern-cutoff").value || "40");
+      if(optimize && (!["efficiency","north","south"].includes(priority) || !Number.isFinite(cutoff) || cutoff < -90 || cutoff > 90)) {
+        routeMessage.textContent = "Choose a supported route priority and a latitude between -90 and 90.";
+        return;
+      }
+      const constrained = priority!=="efficiency" || requestedFirst.some(Boolean);
+      let tiers = requestedStops.map(()=>1);
+      let sectionOffsets = [];
+      let activeIndices = requestedStops.map((_, i) => i);
+      let phase = optimize && (requestedStops.length > DIRECTIONS_WAYPOINT_LIMIT || constrained) ? "baseline" : "final";
+      let baseline = null;
+      let sections;
+      function buildSections(indices) {
+        activeIndices = indices;
+        const points = [origin, ...indices.map(i => requestedStops[i].trim()), destination];
+        sections = []; sectionOffsets = [];
+        let first=0;
+        while(first < points.length-1) {
+          let last=Math.min(first+DIRECTIONS_WAYPOINT_LIMIT+1,points.length-1);
+          if(phase==="final" && optimize && constrained && first<indices.length) {
+            // Never let Google's section optimizer exchange priority groups.
+            const group=tiers[indices[first]];
+            let boundary=first+1;
+            while(boundary<indices.length && tiers[indices[boundary]]===group)boundary++;
+            last=Math.min(last,boundary);
+            if(boundary===indices.length && last===boundary && last-first<=DIRECTIONS_WAYPOINT_LIMIT)last++;
           }
+          sectionOffsets.push(first);sections.push(points.slice(first,last+1));first=last;
+        }
+      }
+      buildSections(activeIndices);
+      let completed = [];
+      let orderedPoints = [origin];
+      let orderedIndices = [];
+      let allLegs = [];
+      routeRequestPending = true;
 
-          if (status === "OK") {
+      const current = () => requestId === routeRequestId;
+      function fail(message) {
+        if (!current()) return;
+        routeRequestPending = false;
+        routeMessage.textContent = message;
+      }
+      function publish() {
+        let keptOriginal = false;
+        if (baseline && baseline.complies && allLegs.reduce((sum, leg) => sum + leg.distance.value, 0) > baseline.distance) {
+          ({ completed, allLegs, orderedPoints, orderedIndices } = baseline);
+          keptOriginal = true;
+        }
+        const totalDistance = allLegs.reduce((sum, leg) => sum + leg.distance.value, 0);
+        const totalDuration = allLegs.reduce((sum, leg) => sum + leg.duration.value, 0);
+        if (!Number.isFinite(totalDistance) || !Number.isFinite(totalDuration)) {
+          fail("Could not calculate route: invalid route totals. Please try again.");
+          return;
+        }
+        const orderedStops = orderedPoints.slice(1, -1);
+        // Only publish after every section is validated. Intermediate successes
+        // never expose a partial map, navigation, trip snapshot or stop reorder.
+        const markers = typeof renderRouteMarkers === "function"
+          ? renderRouteMarkers(map, { routes: [{ legs: allLegs }] }) : null;
+        routeMarkers = markers || [];
+        try {
+          const fitAll = completed.length > 1 && typeof google.maps.LatLngBounds === "function" &&
+            typeof map.fitBounds === "function";
+          const bounds = fitAll ? new google.maps.LatLngBounds() : null;
+          completed.forEach((result, index) => {
+            const renderer = index === 0 ? directionsRenderer : new google.maps.DirectionsRenderer({
+              polylineOptions: typeof D7_ROUTE_STYLE !== "undefined" ? D7_ROUTE_STYLE : { strokeColor: "#ed2944", strokeWeight: 5 }
+            });
+            if (index > 0) sectionRenderers.push(renderer);
+            if (typeof renderer.setOptions === "function") {
+              renderer.setOptions({ suppressMarkers: !!markers, preserveViewport: !!fitAll });
+            }
+            renderer.setDirections(result);
+            renderer.setMap(map);
+            if (bounds) {
+              // Bounds from actual returned leg coordinates also cover every
+              // section when the provider omits an optional route bounds object.
+              const route = result.routes[0];
+              if (route.bounds) bounds.union(route.bounds);
+              else for (const leg of route.legs) {
+                if (leg.start_location) bounds.extend(leg.start_location);
+                if (leg.end_location) bounds.extend(leg.end_location);
+              }
+            }
+          });
+          if (bounds && !bounds.isEmpty()) map.fitBounds(bounds);
+        } catch {
+          clearRouteResults();
+          fail("Could not calculate route: the map could not display the complete route. Please try again.");
+          return;
+        }
+        if (optimize && requestedStops.length) {
+          stops.splice(0, stops.length, ...orderedStops);
+          stopLabels.splice(0, stopLabels.length, ...orderedIndices.map(i => requestedLabels[i]));
+          stopFirst.splice(0, stopFirst.length, ...orderedIndices.map(i => requestedFirst[i]));
+          if(parsedInstructions.first.length)document.getElementById("route-instructions").value=D7Import.instructionText({...parsedInstructions, first:orderedIndices.map((original,i)=>parsedInstructions.first.includes(original+1)?i+1:null).filter(Boolean)});
+          renderStops();
+        }
+        document.getElementById("route-order-note").textContent = baseline
+          ? (keptOriginal ? "Kept the entered order because it had a shorter driving distance than the optimized candidate."
+            : "Geographic ordering across the full list, then optimization within priority groups. Your selected priorities take precedence over distance. This is a heuristic, not a guaranteed shortest route.")
+          : "";
+        routeRequestPending = false;
+        routeShown = true;
+        routeStaleWarning.hidden = true;
+        showNavigation(orderedPoints);
+        routePlan = {
+          start: origin, stops: orderedStops, destination,
+          ...(stopLabels.some(Boolean) ? {stopLabels:[...stopLabels]} : {}),
+          plannedMiles: totalDistance / 1609.344,
+          plannedMinutes: totalDuration / 60,
+          legs: allLegs.map((leg, index) => ({
+            from: orderedPoints[index], to: orderedPoints[index + 1],
+            plannedMiles: leg.distance.value / 1609.344,
+            plannedMinutes: leg.duration.value / 60
+          }))
+        };
+        const miles = (totalDistance / 1609.344).toFixed(1);
+        const minutes = Math.round(totalDuration / 60);
+        const estimate = estimatedFuelCost(Number(miles));
+        const fuelCost = estimate === null ? "" : ` • Est. fuel: $${estimate.toFixed(2)}`;
+        routeMessage.textContent =
+          `${optimize ? "Route optimized" : "Route calculated"}: ${miles} miles • ${minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`}${fuelCost}`;
+      }
+      function requestSection(index) {
+        if (!current()) return;
+        const section = sections[index];
+        const intermediate = section.slice(1, -1);
+        routeMessage.textContent = `${optimize ? "Optimizing route" : "Calculating route"}...` +
+          (sections.length > 1 ? ` ${phase === "baseline" ? "Locating stops · " : ""}Section ${index + 1} of ${sections.length}.` : "");
+        let answered=false;
+        const routeTimeout = setTimeout(() => {
+          if (!current()) return;
+          routeRequestId += 1;
+          routeRequestPending = false;
+          routeMessage.textContent = "Route request timed out. Please try again.";
+        }, ROUTE_REQUEST_TIMEOUT_MS);
+        try {
+          directionsService.route({
+            origin: section[0], destination: section[section.length - 1],
+            waypoints: intermediate.map(address => ({ location: address, stopover: true })),
+            optimizeWaypoints: optimize && phase !== "baseline", travelMode: google.maps.TravelMode.DRIVING
+          }, (result, status) => {
+            if(answered)return;answered=true;
+            clearTimeout(routeTimeout);
+            if (!current()) return;
+            if (JSON.stringify(stops) !== JSON.stringify(requestedStops) ||
+                destinationInput.value.trim() !== destination || startInput.value.trim() !== origin) {
+              invalidateRoute();
+              routeStaleWarning.hidden = false;
+              return;
+            }
+            if (status !== "OK") {
+              if (status === "MAX_ROUTE_LENGTH_EXCEEDED" && section.length > 2) {
+                // A geographically long/complex section may need fewer stops
+                // than Google's waypoint ceiling. Split internally and retry.
+                const middle = Math.floor((section.length - 1) / 2);
+                const offset = sectionOffsets[index];
+                sections.splice(index, 1, section.slice(0, middle + 1), section.slice(middle));
+                sectionOffsets.splice(index, 1, offset, offset + middle);
+                requestSection(index);
+                return;
+              }
+              fail(`Could not calculate route: ${status}`);
+              return;
+            }
             const route = result && result.routes && result.routes[0];
-            if (!route || !Array.isArray(route.legs) ||
-                route.legs.length !== requestedStops.length + 1 ||
+            if (!route || !Array.isArray(route.legs) || route.legs.length !== section.length - 1 ||
                 route.legs.some(leg => !leg || !leg.distance || !leg.duration ||
                   !Number.isFinite(leg.distance.value) || leg.distance.value < 0 ||
                   !Number.isFinite(leg.duration.value) || leg.duration.value < 0)) {
-              routeMessage.textContent = "Could not calculate route: incomplete route result. Please try again.";
+              fail("Could not calculate route: incomplete route result. Please try again.");
               return;
             }
-            let orderedStops = requestedStops;
-            if (optimize && requestedStops.length > 0) {
+            const sectionOffset = sectionOffsets[index];
+            const intermediateIndices = activeIndices.slice(sectionOffset,sectionOffset+intermediate.length);
+            let ids = intermediateIndices;
+            let ordered = intermediate;
+            if (optimize && phase !== "baseline" && intermediate.length) {
               const order = route.waypoint_order;
-              if (!Array.isArray(order) || order.length !== requestedStops.length ||
-                  new Set(order).size !== requestedStops.length ||
-                  !order.every(index => Number.isInteger(index) && index >= 0 && index < requestedStops.length)) {
-                routeMessage.textContent = "Could not calculate route: invalid optimized stop order. Please try again.";
+              if (!Array.isArray(order) || order.length !== intermediate.length ||
+                  new Set(order).size !== intermediate.length ||
+                  !order.every(i => Number.isInteger(i) && i >= 0 && i < intermediate.length)) {
+                fail("Could not calculate route: invalid optimized stop order. Please try again.");
                 return;
               }
-              orderedStops = order.map((index) => requestedStops[index]);
-              stops.splice(0, stops.length, ...orderedStops);
-              renderStops();
+              ordered = order.map(i => intermediate[i]);
+              ids = order.map(i => intermediateIndices[i]);
             }
-            const markers = typeof renderRouteMarkers === "function" ? renderRouteMarkers(map, result) : null;
-            routeMarkers = markers || [];
-            if (typeof directionsRenderer.setOptions === "function") {
-              directionsRenderer.setOptions({ suppressMarkers: !!markers });
-            }
-            directionsRenderer.setDirections(result);
-            directionsRenderer.setMap(map);
-            routeShown = true;
-            routeStaleWarning.hidden = true;
-            showNavigation([origin, ...orderedStops.map((address) => address.trim()), destination]);
-
-            let totalDistance = 0;
-            let totalDuration = 0;
-
-            route.legs.forEach((leg) => {
-              totalDistance += leg.distance.value;
-              totalDuration += leg.duration.value;
-            });
-
-            routePlan = {
-              start: origin, stops: navigationPoints.slice(1, -1), destination,
-              plannedMiles: totalDistance / 1609.344,
-              plannedMinutes: totalDuration / 60,
-              legs: route.legs.map((leg, index) => ({
-                from: navigationPoints[index], to: navigationPoints[index + 1],
-                plannedMiles: leg.distance.value / 1609.344,
-                plannedMinutes: leg.duration.value / 60
-              }))
-            };
-
-            const miles = (totalDistance / 1609.344).toFixed(1);
-            const minutes = Math.round(totalDuration / 60);
-            const estimate = estimatedFuelCost(Number(miles));
-            const fuelCost = estimate === null ? "" : ` • Est. fuel: $${estimate.toFixed(2)}`;
-
-            routeMessage.textContent =
-              `${optimize ? "Route optimized" : "Route calculated"}: ${miles} miles • ${minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`}${fuelCost}`;
-          } else {
-            routeMessage.textContent =
-              `Could not calculate route: ${status}`;
-          }
+            completed.push(result);
+            allLegs.push(...route.legs);
+            orderedPoints.push(...ordered, section[section.length - 1]);
+            orderedIndices.push(...ids);
+            if (index+1 < sections.length) orderedIndices.push(activeIndices[sectionOffset+intermediate.length]);
+            if (index + 1 < sections.length) requestSection(index + 1);
+            else if (phase === "baseline") {
+              if(!Number.isFinite(allLegs.reduce((sum,leg)=>sum+leg.distance.value,0)) || !Number.isFinite(allLegs.reduce((sum,leg)=>sum+leg.duration.value,0))) { fail("Could not calculate route: invalid route totals. Please try again."); return; }
+              const order = geographicStopOrder(allLegs,requestedFirst,priority,cutoff);
+              if (!order) {
+                fail("Could not optimize the full stop list: address coordinates were unavailable. Use Keep My Order to preserve your order.");
+                return;
+              }
+              tiers=order.tiers;
+              baseline = { completed, allLegs, orderedPoints, orderedIndices,
+                complies: orderedIndices.every((id,i)=>i===0 || tiers[orderedIndices[i-1]]<=tiers[id]),
+                distance: allLegs.reduce((sum, leg) => sum+leg.distance.value,0) };
+              phase = "final";
+              completed = []; allLegs = []; orderedPoints = [origin]; orderedIndices = [];
+              buildSections(order.indices);
+              requestSection(0);
+            } else publish();
+          });
+        } catch {
+          answered=true;clearTimeout(routeTimeout);
+          fail("Could not calculate route: the request could not be sent. Please try again.");
         }
-      );
+      }
+      requestSection(0);
+      if(requestedStops.length>25)routeMessage.scrollIntoView({block:"nearest"});
     }
 
     updateStopCounter();

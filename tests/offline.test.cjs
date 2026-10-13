@@ -55,6 +55,7 @@ function worker({ installFails = false, networkFails = false } = {}) {
 test('the installed shell reopens at the Pages subpath with no network', async () => {
   const w = worker({ networkFails: true });
   await w.lifecycle('install');
+  assert.equal(w.activations, 1, 'Only a successfully cached complete shell may activate');
   for (const [url, expected] of w.entries) {
     const relative = url.slice(w.scope.length) || 'index.html';
     assert.equal(existsSync(path.join(__dirname, '..', relative)), true, relative);

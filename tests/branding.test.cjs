@@ -179,7 +179,7 @@ test('facelift markup retains every application control once', () => {
 });
 
 test('route actions remain distinct and address fields remain labelled', () => {
-  for (const [id, label] of [['plan-route', 'Optimize Route'], ['calculate-route', 'Calculate Route']]) {
+  for (const [id, label] of [['plan-route', 'Plan Route'], ['calculate-route', 'Keep My Order']]) {
     const button = html.match(new RegExp(`<button\\b[^>]*\\bid=["']${id}["'][^>]*>([\\s\\S]*?)<\\/button>`));
     assert.ok(button, `Missing ${id} button`);
     assert.match(button[0], /\btype=["']button["']/);
