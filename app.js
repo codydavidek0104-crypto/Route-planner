@@ -144,13 +144,14 @@
     let currentReport = null;
 
     function showView(selected, focusHeading = false) {
+      document.getElementById("workspace").setAttribute("data-view", selected);
       document.getElementById("journey-controls").hidden = selected !== "plan";
-      for (const name of ["plan", "saved", "reports"]) {
+      for (const name of ["plan", "saved", "calendar", "reports"]) {
         document.getElementById(name + "-view").hidden = name !== selected;
         document.getElementById("view-" + name).setAttribute("aria-current", name === selected ? "page" : "false");
       }
       if (focusHeading) {
-        const id = selected === "plan" ? (tripProgress ? "trip-heading" : "route-heading") : selected === "saved" ? "saved-heading" : "reports-heading";
+        const id = selected === "plan" ? (tripProgress ? "trip-heading" : "route-heading") : selected + "-heading";
         document.getElementById(id).focus();
       }
     }
