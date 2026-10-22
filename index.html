@@ -161,42 +161,8 @@
               <p class="stat-readout"><span id="stat-fuel">—</span></p>
             </div>
           </div>
-        </section>
-
-        <section id="saved-view" class="panel saved-panel" aria-labelledby="saved-heading" hidden>
-          <div class="section-intro">
-            <p class="eyebrow">On this device</p>
-            <h2 id="saved-heading" tabindex="-1">Saved routes</h2>
-          </div>
-          <div class="field">
-            <label for="route-name">Route name</label>
-            <input id="route-name" type="text" placeholder="Example: Monday deliveries">
-          </div>
-          <label for="saved-route-select">Load a saved route</label>
-          <select id="saved-route-select"><option value="">No saved routes</option></select>
-          <div class="save-actions">
-            <button id="save-route" class="btn" type="button" aria-label="Save route">Save</button>
-            <button id="load-route" class="btn" type="button" aria-label="Load route">Load</button>
-            <button id="delete-route" class="btn delete-route-button" type="button" aria-label="Delete route">Delete</button>
-          </div>
-          <div class="backup-section">
-            <h3>Take your routes with you</h3>
-            <p class="hint">Export a backup to move saved routes to another device. Import merges routes and asks before replacing matching names.</p>
-            <div class="backup-actions">
-              <button id="export-routes" class="btn" type="button">Export JSON</button>
-              <button id="import-routes" class="btn" type="button">Import JSON</button>
-              <input id="import-routes-file" type="file" accept=".json,application/json" aria-label="Import saved routes from a JSON backup" hidden>
-            </div>
-            <p id="backup-message" class="backup-message" role="status" aria-live="polite"></p>
-          </div>
-        </section>
-
-        <section id="calendar-view" class="panel calendar-panel" aria-labelledby="calendar-heading" hidden>
-          <div class="section-intro">
-            <p class="eyebrow">Your route schedule</p>
-            <h2 id="calendar-heading" tabindex="-1">Calendar</h2>
-            <p class="hint">Plan a route, then choose Add to calendar when it is ready. Select a date to see scheduled routes.</p>
-          </div>
+        <section id="calendar-view" class="panel calendar-panel" aria-labelledby="calendar-heading">
+          <h2 id="calendar-heading" class="calendar-title" tabindex="-1">Calendar</h2>
           <p id="calendar-message" class="calendar-message" role="status" aria-live="polite"></p>
           <form id="calendar-editor" class="calendar-editor" hidden>
             <h3 id="calendar-editor-heading" tabindex="-1">Add route to calendar</h3>
@@ -227,7 +193,46 @@
               <div id="calendar-entries"></div>
             </div>
           </div>
-          <p class="hint calendar-storage-note">Saved in this browser on this device. This calendar does not sync between devices and is not included in saved-route backups. Clearing browser data removes it.</p>
+          <details class="calendar-help"><summary>About your calendar</summary><p class="hint">Plan a route, then choose Add to calendar when it is final. Saved in this browser on this device. No automatic scheduling or device sync. Calendar entries are not included in saved-route backups; clearing browser data removes them.</p></details>
+        </section>
+        <details id="weather-panel" class="weather-panel">
+          <summary id="weather-heading">Weather along your route</summary>
+          <p class="hint">Choose any stop after planning a route. National Weather Service forecasts cover supported U.S. locations for about seven days. These are upcoming forecasts, not conditions at your arrival time.</p>
+          <label for="weather-stop">Route location</label>
+          <select id="weather-stop" disabled><option value="">Plan a route first</option></select>
+          <button id="check-weather" class="btn" type="button" disabled>Check forecast</button>
+          <p id="weather-message" class="hint" role="status" aria-live="polite"></p>
+          <div id="weather-results"></div>
+        </details>
+
+        </section>
+
+        <section id="saved-view" class="panel saved-panel" aria-labelledby="saved-heading" hidden>
+          <div class="section-intro">
+            <p class="eyebrow">On this device</p>
+            <h2 id="saved-heading" tabindex="-1">Saved routes</h2>
+          </div>
+          <div class="field">
+            <label for="route-name">Route name</label>
+            <input id="route-name" type="text" placeholder="Example: Monday deliveries">
+          </div>
+          <label for="saved-route-select">Load a saved route</label>
+          <select id="saved-route-select"><option value="">No saved routes</option></select>
+          <div class="save-actions">
+            <button id="save-route" class="btn" type="button" aria-label="Save route">Save</button>
+            <button id="load-route" class="btn" type="button" aria-label="Load route">Load</button>
+            <button id="delete-route" class="btn delete-route-button" type="button" aria-label="Delete route">Delete</button>
+          </div>
+          <div class="backup-section">
+            <h3>Take your routes with you</h3>
+            <p class="hint">Export a backup to move saved routes to another device. Import merges routes and asks before replacing matching names.</p>
+            <div class="backup-actions">
+              <button id="export-routes" class="btn" type="button">Export JSON</button>
+              <button id="import-routes" class="btn" type="button">Import JSON</button>
+              <input id="import-routes-file" type="file" accept=".json,application/json" aria-label="Import saved routes from a JSON backup" hidden>
+            </div>
+            <p id="backup-message" class="backup-message" role="status" aria-live="polite"></p>
+          </div>
         </section>
 
         <section id="reports-view" class="panel report-history" aria-labelledby="reports-heading" hidden>
@@ -295,6 +300,13 @@
 
       <section class="map-panel" aria-labelledby="map-heading">
         <h2 id="map-heading" class="sr-only">Live route map</h2>
+        <div class="map-toolbar" role="group" aria-label="Map tools">
+          <button id="toggle-traffic" type="button" aria-pressed="false" aria-describedby="traffic-note" disabled>Traffic</button>
+          <button id="fit-route" type="button" disabled>Show full route</button>
+          <button id="view-weather" type="button">Weather</button>
+        </div>
+        <p id="traffic-note" class="map-tool-note" hidden>Live traffic where available. This overlay does not change your route order or drive-time estimate.</p>
+        <p id="map-tool-message" class="map-tool-note" role="status" aria-live="polite"></p>
         <div id="map" aria-label="Google map"></div>
         <div id="map-access-note" class="map-access-note" role="status" hidden></div>
       </section>
@@ -316,6 +328,7 @@
   <script src="stop-import.js"></script>
   <script src="app.js"></script>
   <script src="calendar.js"></script>
+  <script src="route-tools.js"></script>
 <script
   async
   onerror="handleMapsLoadFailure()"

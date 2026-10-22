@@ -147,6 +147,7 @@ function setup(confirmations = [], {
   vm.runInContext(readFileSync(path.join(__dirname, '../stop-import.js'), 'utf8'), context);
   vm.runInContext(readFileSync(path.join(__dirname, '../app.js'), 'utf8'), context);
   vm.runInContext(readFileSync(path.join(__dirname, '../calendar.js'), 'utf8'), context);
+  vm.runInContext(readFileSync(path.join(__dirname, '../route-tools.js'), 'utf8'), context);
   if (init) vm.runInContext('initMap()', context);
   const click = id => el(id).listeners.click();
   const add = address => { el('stop-input').value = address; click('add-stop'); };
@@ -212,6 +213,21 @@ test('calendar schedules only on explicit submission and retains final order ind
   assert.equal(a.el('calendar-entries').children[0].children[0].textContent, 'Northern stores');
   a.click('calendar-day-2026-10-24');
   assert.match(a.el('calendar-entries').children[0].textContent, /No routes/);
+});
+
+test('calendar navigation keeps the planner visible and route edits clear weather choices', () => {
+  const a = setup(); a.click('view-calendar');
+  assert.equal(a.el('plan-view').hidden, false);
+  assert.equal(a.el('calendar-view').hidden, false);
+  a.calculate(); a.reply(0, 'OK', undefined, [
+    {distance:{value:1000},duration:{value:100},start_location:{lat:38,lng:-121},end_location:{lat:39,lng:-121}},
+    {distance:{value:1000},duration:{value:100},start_location:{lat:39,lng:-121},end_location:{lat:40,lng:-121}}
+  ]);
+  assert.equal(a.el('weather-stop').children.length,3);
+  assert.equal(a.el('weather-stop').disabled,false);
+  a.destination('A changed finish');
+  assert.equal(a.el('weather-stop').disabled,true);
+  assert.equal(a.el('check-weather').disabled,true);
 });
 
 test('calendar rejects unfinished, stale, duplicate and invalid-date schedules', () => {

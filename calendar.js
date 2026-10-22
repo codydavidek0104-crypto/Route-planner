@@ -89,7 +89,7 @@ const D7Calendar = (() => {
     el("calendar-name").value = entry ? entry.name : routeNameInput.value.trim();
     el("calendar-start").value = entry ? entry.startDate : selected;
     el("calendar-end").value = entry ? entry.endDate : selected;
-    el("calendar-route-summary").textContent = `${draft.stops.length} stops · ${draft.start} → ${draft.destination}. A separate copy keeps this stop order.`;
+    el("calendar-route-summary").textContent = `${draft.stops.length} stop${draft.stops.length === 1 ? "" : "s"} · ${draft.start} → ${draft.destination}. A separate copy keeps this stop order.`;
     editor.hidden = false;
     showView("calendar");
     render();
@@ -126,7 +126,7 @@ const D7Calendar = (() => {
   function entryCard(entry) {
     const card = node("article", undefined, "calendar-entry");
     card.appendChild(node("h4", entry.name));
-    card.appendChild(node("p", `${dates(entry)} · ${entry.route.stops.length} stops`, "hint"));
+    card.appendChild(node("p", `${dates(entry)} · ${entry.route.stops.length} stop${entry.route.stops.length === 1 ? "" : "s"}`, "hint"));
     const details = node("details");
     details.appendChild(node("summary", "View route"));
     const list = node("ol", undefined, "calendar-route-list");
@@ -237,5 +237,6 @@ const D7Calendar = (() => {
   if (typeof window.addEventListener === "function") window.addEventListener("storage", event => {
     if ((event.key === KEY || event.key === null) && !el("calendar-view").hidden) render();
   });
+  render();
   return { render };
 })();

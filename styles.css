@@ -241,11 +241,16 @@ input[type="hidden"] { display: none !important; }
 @media(max-width:480px) { .stops-container { max-height: 320px; } }
 
 /* Calendar shares D7's restrained black and crimson palette. */
+.calendar-panel { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 24px; }
+.calendar-title { font-size: 16px; font-weight: 500; margin-bottom: 12px; scroll-margin-top: 20px; }
+.calendar-help { font-size: 12px; color: var(--text-faint); margin-top: 16px; }
+.calendar-help summary { min-height: 44px; cursor: pointer; padding: 10px 0; }
 .calendar-panel .section-intro .hint { margin-top: 12px; max-width: 65ch; }
 .calendar-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
-.calendar-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+.calendar-toolbar { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
 .calendar-toolbar h3 { flex: 1; text-align: center; margin: 0; }
-.calendar-toolbar button { padding: 8px 12px; }
+.calendar-toolbar button { padding: 6px 9px; border: 0; background: none; font-size: 12px; }
+.calendar-toolbar h3 { font-size: 14px; }
 .calendar-weekdays, .calendar-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
 .calendar-weekdays { margin-bottom: 10px; text-align: center; font-size: 12px; color: var(--text-faint); }
 .calendar-day { position: relative; min-width: 0; min-height: 44px; border: 1px solid transparent; border-radius: 50%; background: transparent; color: var(--text); font-size: 14px; padding: 8px 0; }
@@ -254,7 +259,8 @@ input[type="hidden"] { display: none !important; }
 .calendar-day[aria-pressed="true"] { background: #a20d2b; border-color: var(--crimson); color: #fff; }
 .calendar-day.has-routes::after { content: ""; position: absolute; width: 5px; height: 5px; bottom: 5px; left: calc(50% - 2.5px); border-radius: 50%; background: var(--red-hot); }
 .calendar-day.has-routes[aria-pressed="true"]::after { background: #fff; }
-.calendar-legend { margin-top: 16px; }
+.calendar-legend { margin: 8px 0 0; font-size: 11px; }
+.calendar-agenda h3 { font-size: 14px; }
 .calendar-agenda { border-top: 1px solid var(--line); padding-top: 20px; }
 .calendar-entry { padding: 16px 0; margin-bottom: 14px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .calendar-entry h4 { margin: 0 0 6px; font-size: 18px; font-weight: 500; }
@@ -272,6 +278,22 @@ input[type="hidden"] { display: none !important; }
 .calendar-message:empty { display: none; }
 .calendar-storage-note { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--line); }
 #add-to-calendar { width: 100%; margin-bottom: 10px; }
+.map-toolbar { display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: center; padding: 6px 20px; background: #000; border-bottom: 1px solid var(--line); }
+.map-toolbar button { border: 0; padding: 8px 0; background: none; color: var(--text-dim); font-size: 13px; }
+.map-toolbar button[aria-pressed="true"] { color: var(--red-hot); box-shadow: inset 0 -2px var(--crimson); }
+.map-tool-note { padding: 8px 20px; margin: 0; font-size: 12px; color: var(--text-dim); background: #000; }
+.map-tool-note:empty { display: none; }
+.weather-panel { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 8px; scroll-margin-top: 20px; }
+.weather-panel > summary { cursor: pointer; min-height: 44px; padding: 10px 0; font-size: 14px; }
+.weather-panel .hint { font-size: 12px; }
+#check-weather { margin: 14px 0; font-size: 13px; }
+#weather-results h3 { overflow-wrap: anywhere; font-size: 14px; }
+#weather-results a { font-size: 12px; }
+.weather-periods { list-style: none; padding: 0; margin: 12px 0; max-height: 400px; overflow: auto; }
+.weather-periods li { padding: 12px 0; border-top: 1px solid var(--line); }
+.weather-periods strong { font-size: 14px; font-weight: 500; }
+.weather-periods p { font-size: 13px; margin: 3px 0; color: var(--text-dim); }
+.weather-periods small { color: var(--text-faint); font-size: 12px; }
 @media(max-width: 950px) { .primary-nav { gap: 18px; } .console-header { gap: 20px; } }
 @media(max-width: 700px) {
   .calendar-layout { grid-template-columns: 1fr; gap: 22px; }
