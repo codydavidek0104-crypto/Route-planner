@@ -30,6 +30,7 @@ function setup(confirmations = [], {
       addEventListener(name, fn) { this.listeners[name] = fn; },
       setAttribute(name, value) { this[name] = value; },
       focus() { focusedElement = this; }, select() {}, scrollIntoView() {},
+      showModal() { this.open = true; }, close() { this.open = false; this.listeners.close?.(); },
     };
   }
   const el = id => {
@@ -259,6 +260,22 @@ test('calendar survives reopening offline and reloads labels and ordered stops w
   assert.equal(b.requests.length, 0);
   assert.equal(b.el('plan-view').hidden, false);
   assert.match(b.el('route-message').textContent, /Keep My Order/);
+});
+
+test('scheduled dates open route details and rescheduling closes the dialog; empty dates stay quiet', () => {
+  const a = setup(); a.calculate(); a.reply(0); schedule(a);
+  a.click('calendar-day-2026-10-21');
+  assert.equal(a.el('calendar-dialog').open, true);
+  assert.equal(a.el('calendar-entries').children[0].children[2].open, true);
+  calendarAction(a, 'Reschedule');
+  assert.equal(a.el('calendar-dialog').open, false);
+  a.click('calendar-cancel');
+  a.click('calendar-day-2026-10-22');
+  assert.equal(a.el('calendar-dialog').open, false);
+  assert.match(a.el('calendar-message').textContent, /No routes scheduled/);
+  a.click('calendar-day-2026-10-21');
+  a.click('calendar-dialog-close');
+  assert.equal(a.el('calendar-dialog').open, false);
 });
 
 test('calendar rescheduling preserves route and entry identity, removal does not touch saves', () => {

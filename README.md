@@ -20,7 +20,7 @@ No build step or server application is required. Publish the root files and icon
 
 The compact calendar sits below the planner controls, with the map alongside it on desktop. **Calendar** jumps to the schedule. After planning the final route, choose **Add to calendar**, enter a name and choose one date or an inclusive date range. Nothing is scheduled automatically. A range marks the same route on each selected day; it does not divide stops into daily jobs or calculate arrival times.
 
-Select a date to view its routes. **View route** shows the saved order, **Reschedule** changes the name or dates, and **Load route** brings a separate copy into the planner. Use **Keep My Order** to obtain fresh directions without optimizing that order. Loading asks before replacing an existing draft and is blocked during an active trip. Later planner edits do not change the calendar snapshot.
+Select a scheduled date to open its routes in a small dialog, or a bottom sheet on phones. The saved order is expanded immediately. Close with the × button, Escape or the backdrop. Empty dates show a short message. **Reschedule** changes the name or dates, and **Load route** brings a separate copy into the planner. Use **Keep My Order** to obtain fresh directions without optimizing that order. Loading asks before replacing an existing draft and is blocked during an active trip. Later planner edits do not change the calendar snapshot.
 
 Calendar entries are saved only in this browser/device, up to 500 entries. They do not sync to Google Calendar or other devices and are not included in saved-route JSON backups. Clearing site data can remove them. The update retains existing saved routes and reports.
 

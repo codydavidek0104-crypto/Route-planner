@@ -3,6 +3,16 @@ const D7Calendar = (() => {
   const KEY = "d7CalendarV1";
   const el = id => document.getElementById(id);
   const editor = el("calendar-editor");
+  const dialog = el("calendar-dialog");
+  function closeDetails(restoreFocus = true) {
+    if (dialog.open) { dialog.close(); if (restoreFocus) el("calendar-day-" + selected)?.focus(); }
+  }
+  el("calendar-dialog-close").addEventListener("click", () => closeDetails());
+  dialog.addEventListener("click", event => { if (event.target === dialog) {
+    const rect = dialog.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeDetails();
+  } });
+  dialog.addEventListener("cancel", event => { event.preventDefault(); closeDetails(); });
   let draft = null;
   let editingId = null;
   let editingOriginal = null;
@@ -81,6 +91,7 @@ const D7Calendar = (() => {
     }}).route;
   }
   function openEditor(entry) {
+    closeDetails(false);
     editingId = entry ? entry.id : null;
     editingOriginal = entry ? JSON.stringify(entry) : null;
     draft = entry ? entry.route : currentSnapshot();
@@ -107,6 +118,7 @@ const D7Calendar = (() => {
     if ((startInput.value.trim() || destinationInput.value.trim() || stops.length) &&
         !window.confirm("Load this calendar route into the planner? This replaces the current draft. The calendar copy stays saved.")) return;
     const route = entry.route;
+    closeDetails(false);
     invalidateRoute();
     startInput.value = route.start;
     destinationInput.value = route.destination;
@@ -128,6 +140,7 @@ const D7Calendar = (() => {
     card.appendChild(node("h4", entry.name));
     card.appendChild(node("p", `${dates(entry)} · ${entry.route.stops.length} stop${entry.route.stops.length === 1 ? "" : "s"}`, "hint"));
     const details = node("details");
+    details.open = !!dialog.open;
     details.appendChild(node("summary", "View route"));
     const list = node("ol", undefined, "calendar-route-list");
     list.appendChild(node("li", `Start: ${entry.route.start}`));
@@ -177,7 +190,13 @@ const D7Calendar = (() => {
     for (let day = 1; day <= days; day++) {
       const key = `${month}-${String(day).padStart(2, "0")}`;
       const count = entries.filter(entry => entry.startDate <= key && entry.endDate >= key).length;
-      const item = button(String(day), () => { selected = key; render(); el("calendar-day-" + key).focus(); });
+      const item = button(String(day), () => {
+        selected = key;
+        if (count && !dialog.open) dialog.showModal();
+        render();
+        if (count) el("calendar-dialog-close").focus();
+        else { notice("No routes scheduled for " + pretty(key) + "."); el("calendar-day-" + key).focus(); }
+      });
       item.id = "calendar-day-" + key;
       item.className = "calendar-day" + (count ? " has-routes" : "");
       item.setAttribute("aria-label", `${pretty(key)}${count ? `, ${count} scheduled route${count === 1 ? "" : "s"}` : ", no routes"}`);
