@@ -12,7 +12,7 @@ if (output === source || output.startsWith(source + '/') || output.startsWith(so
 }
 const files = [
   'index.html', 'styles.css', 'map-theme.js', 'app.js', 'calendar.js', 'route-tools.js',
-  'stop-import.js', 'instruction-assistant.js', 'service-worker.js', 'manifest.webmanifest',
+  'stop-import.js', 'service-worker.js', 'manifest.webmanifest',
   'favicon.svg', 'favicon-32.png', 'favicon.ico',
   'vendor/exceljs.min.js', 'vendor/exceljs-LICENSE.txt',
   'icons/mark.svg', 'icons/mark-maskable.svg', 'icons/d7-mark-only.png',

@@ -18,7 +18,7 @@ No build step or server application is required. Publish the root files and icon
 
 ## Calendar, weather and map update
 
-The compact calendar sits below the planner controls, with the map alongside it on desktop. **Calendar** jumps to the schedule. After planning the final route, choose **Add to calendar**, enter a name and choose one date or an inclusive date range. Nothing is scheduled automatically. A range marks the same route on each selected day; it does not divide stops into daily jobs or calculate arrival times.
+The compact calendar sits below the planner controls in a 310px desktop sidebar, leaving more space for the map. The approved map-focus styling is included in styles.css and requires no preview URL or injected script. **Calendar** jumps to the schedule. After planning the final route, choose **Add to calendar**, enter a name and choose one date or an inclusive date range. Nothing is scheduled automatically. A range marks the same route on each selected day; it does not divide stops into daily jobs or calculate arrival times.
 
 Select a scheduled date to open its routes in a small dialog, or a bottom sheet on phones. The saved order is expanded immediately. Close with the × button, Escape or the backdrop. Empty dates show a short message. **Reschedule** changes the name or dates, and **Load route** brings a separate copy into the planner. Use **Keep My Order** to obtain fresh directions without optimizing that order. Loading asks before replacing an existing draft and is blocked during an active trip. Later planner edits do not change the calendar snapshot.
 
@@ -52,8 +52,6 @@ For unconstrained routes of up to 25 stops, Google optimizes the whole waypoint 
 
 ## Job spreadsheet import
 
-The unpublished preview also includes a plain-English instruction translator; see [Worker setup and limits](worker/README.md). Convert → review/edit → Confirm rules applies only supported clauses to the existing planner. Exact supported rules need no AI. A backend key is required for actual plain-English conversion and is never placed in the static app. Unsupported weather, timing, start/end changes and strict sequencing are rejected rather than silently omitted.
-
 Upload XLSX, CSV or TSV once, review the detected sheet/columns and selected rows, optionally enter instructions, then use **Import & Plan Route** for the same default planner. **Use stops only** lets the user edit before planning. Both keep Start, Finish, MPG, fuel price and existing saved routes intact. The default import replaces the draft stop list; Append is an explicit option. Existing active trips cannot be overwritten by import.
 
 File parsing happens locally with a vendored MIT-licensed ExcelJS 4.4.0 browser build. No spreadsheet is uploaded to a server; addresses are sent to Google only when route planning is requested. The reader detects common complete-address and street/city/state/postal headers, accepts headerless address lists, and offers manual mapping and worksheet/header selection. Mixed full/street-only Address fields are joined with missing locality fields without repeating already-present components. Store labels stay separate from routing addresses, survive reordering/saves/JSON backups and appear in itinerary/trip/report text. Blank rows are omitted, unusable address rows are excluded visibly, and duplicate addresses are preserved as separate visits. Preview is text validation, not confirmation that Google has resolved each address.
@@ -62,6 +60,8 @@ Practical import limits: 5 MB file, 5,000 data rows, 100 columns, 100 worksheets
 Only after this optimization are navigation URLs split into overlapping legs. Links contain at most nine intermediate waypoints on desktop or three for recognized mobile browsers/iPads. URL navigation requires internet; Start from my location applies only to the first leg. Unusual browsers that do not identify themselves as mobile may need next-stop navigation. Very long addresses can exceed Google's 2,048-character URL limit; next-stop navigation uses shorter URLs.
 
 Address edits, a newer request, normalization from autocomplete, authentication failure, and request timeouts keep obsolete responses from publishing. Missing or malformed result data does not start a trip. The existing trip snapshots and reports remain available.
+
+New sessions default to the dated U.S. regular national-average fuel reference in the page. Previously remembered device prices do not override that default. Explicitly loaded routes and active trips retain their saved fuel values.
 
 Editing MPG or fuel price refreshes the fuel estimate for a current valid plan without another Maps request. Invalid or overflowing costs show as unavailable. Active trips keep the estimate and fuel settings captured when they started.
 

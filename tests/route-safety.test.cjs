@@ -197,19 +197,17 @@ function calendarAction(a, label) {
   return a.el('calendar-entries').children[0].children.at(-1).children.find(item => item.textContent === label).click();
 }
 
-test('fuel preference survives reopening with two decimals and ignores invalid edits', () => {
-  const a = setup();
-  a.el('fuel-price').value = '5.679'; a.el('fuel-price').listeners.change();
-  assert.equal(a.el('fuel-price').value, '5.68');
-  assert.equal(a.stored.d7FuelPricePreference, '5.68');
-  a.el('fuel-price').value = ''; a.el('fuel-price').listeners.change();
-  assert.equal(a.stored.d7FuelPricePreference, '5.68');
-  const b = setup([], { storage: a.stored });
-  assert.equal(b.el('fuel-price').value, '5.68');
-  vm.runInContext('localStorage.setItem = () => { throw new Error("Unavailable"); }', b.context);
-  b.el('fuel-price').value = '4.2'; b.el('fuel-price').listeners.change();
-  assert.equal(b.el('fuel-price').value, '4.20');
-  assert.match(b.el('fuel-price-source').textContent, /session/);
+test('new sessions retain the national-average default despite old device preferences', () => {
+  const stored = { d7FuelPricePreference: '9.99' };
+  const a = setup([], { storage: stored });
+  assert.equal(a.el('fuel-price').value, '4.50', 'Retain the page-provided default used by this fixture');
+  a.el('fuel-price').value = '5.679'; a.el('fuel-price').listeners.input();
+  const b = setup([], { storage: stored });
+  assert.equal(b.el('fuel-price').value, '4.50', 'Reopening must not restore a previous custom price');
+  assert.equal(stored.d7FuelPricePreference, '9.99', 'Leave existing storage intact but unused');
+  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /id="fuel-price"[^>]*value="4\.2644"/);
+  assert.match(html, /U\.S\. regular national average/);
 });
 
 test('calendar schedules only on explicit submission and retains final order independently', () => {

@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta id="instruction-endpoint" name="d7-instruction-endpoint" content="./api/instructions">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>D7 Route | D7 Marketing</title>
   <meta
@@ -111,18 +110,6 @@
           </details>
           <details class="route-priorities">
             <summary>Route instructions (optional)</summary>
-            <label for="plain-instructions">Describe your priorities</label>
-            <textarea id="plain-instructions" maxlength="512" placeholder="Example: Visit the northern stores before the southern stores"></textarea>
-            <p class="hint">Convert sends only this text to the AI service. Use stop numbers, never customer addresses or contact details. Weather deadlines and a strict north-to-south sequence are not supported.</p>
-            <button id="convert-instructions" class="btn" type="button">Convert instructions</button>
-            <button id="cancel-instructions" class="btn" type="button">Cancel conversion</button>
-            <p id="instruction-message" class="hint" role="status" aria-live="polite"></p>
-            <div id="instruction-review" hidden>
-              <label for="converted-instructions">Review or edit the converted rules</label>
-              <textarea id="converted-instructions" maxlength="512"></textarea>
-              <p class="hint">North means latitude 40° or higher unless you set north cutoff. First stops take priority over north/south groups. Start and Finish stay fixed. These rules do not schedule around weather or guarantee strict geographic order.</p>
-              <button id="confirm-instructions" class="btn" type="button">Confirm rules</button>
-            </div>
             <label for="route-instructions">Route instructions (optional)</label>
             <textarea id="route-instructions" maxlength="512" placeholder="Leave blank to reduce driving"></textarea>
             <input id="route-priority" type="hidden" value="efficiency"><input id="northern-cutoff" type="hidden" value="40">
@@ -143,8 +130,8 @@
               </div>
               <div>
                 <label for="fuel-price">Fuel price · $ / gallon</label>
-                <input id="fuel-price" type="number" min="0.01" step="0.01" value="4.26" aria-describedby="fuel-price-source">
-                <small id="fuel-price-source" class="hint" style="display:block;font-size:0.65rem;line-height:1.4;margin-top:0.35rem">Starting reference: U.S. regular average $4.26/gal &middot; <time datetime="2026-10-21">Oct 21, 2026</time> (<a href="https://gasprices.aaa.com/" target="_blank" rel="noopener noreferrer">AAA</a>). Enter your price to remember it on this device.</small>
+                <input id="fuel-price" type="number" min="0.01" step="0.0001" value="4.2644" aria-describedby="fuel-price-source">
+                <small id="fuel-price-source" class="hint" style="display:block;font-size:0.65rem;line-height:1.4;margin-top:0.35rem">* U.S. regular national average: $4.2644/gal &middot; <time datetime="2026-10-21">Oct 21, 2026</time> (<a href="https://gasprices.aaa.com/" target="_blank" rel="noopener noreferrer">AAA</a>).</small>
               </div>
               <p class="hint">Fuel estimates use these values. Trip records keep the values used when the trip started.</p>
             </div>
@@ -344,7 +331,6 @@
   <script src="app.js"></script>
   <script src="calendar.js"></script>
   <script src="route-tools.js"></script>
-  <script src="instruction-assistant.js"></script>
 <script
   async
   onerror="handleMapsLoadFailure()"
