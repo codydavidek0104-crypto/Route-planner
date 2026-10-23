@@ -58,20 +58,20 @@ function renderRouteMarkers(map, result) {
       ),
       anchor: new maps.Point(anchorX, anchorY)
     });
-    const endpointIcon = icon(
+    const endpointIcon = letter => icon(
       '<circle cx="16" cy="16" r="14" fill="#151a1c" stroke="#ed2944" stroke-width="2"/>' +
-      '<path d="M16 24C14 21 10 17 10 13A6 6 0 0 1 22 13C22 17 18 21 16 24Z" fill="#f3f2ef"/>' +
-      '<circle cx="16" cy="13" r="2.5" fill="#151a1c"/>',
-      32, 32, 16, 16
-    );
+      `<text x="16" y="21" text-anchor="middle" font-family="Arial,sans-serif" font-size="15" font-weight="700" fill="#fff">${letter}</text>`,
+      32, 32, 16, 16);
 
     points.forEach((position, index) => {
       const finish = index === points.length - 1;
       const title = index === 0 ? "Start" : finish ? "Finish" : `Stop ${index}`;
-      const markerIcon = index === 0 || finish ? endpointIcon : icon(
-        '<circle cx="16" cy="16" r="13" fill="#db1236" stroke="#f3f2ef" stroke-width="1.5"/>' +
-        `<text x="16" y="21" text-anchor="middle" font-family="Arial,sans-serif" font-size="${index < 10 ? 15 : 13}" font-weight="600" fill="#f3f2ef">${index}</text>`,
-        32, 32, 16, 16
+      const size = index >= 100 ? 42 : 36;
+      const center = size / 2;
+      const markerIcon = index === 0 || finish ? endpointIcon(finish ? "F" : "S") : icon(
+        `<circle cx="${center}" cy="${center}" r="${center - 3}" fill="#b80e2e" stroke="#fff" stroke-width="2"/>` +
+        `<text x="${center}" y="${center + 5}" text-anchor="middle" font-family="Arial,sans-serif" font-size="15" font-weight="700" fill="#fff">${index}</text>`,
+        size, size, center, center
       );
       markers.push(new maps.Marker({
         map, position, title, icon: markerIcon,

@@ -9,10 +9,28 @@ No build step or server application is required. Publish the root files and icon
 - `styles.css`: pure-black responsive interface, open address timeline and restrained crimson actions.
 - `map-theme.js`: embedded dark roadmap styling and real-coordinate route markers.
 - `app.js`: route planning, navigation, saved routes, trip progress and reports.
+- `calendar.js`: explicit scheduling of final route snapshots in this browser.
+- `route-tools.js`: traffic controls, full-route view and on-demand stop forecasts.
 - `service-worker.js`: versioned, same-origin app shell cache.
 - `manifest.webmanifest` and `icons/`: existing install metadata and D7 assets.
 
-`map-theme.js` loads before `app.js`, which loads before the asynchronous Google script so `initMap` and the error handler are available when Google calls them. Do not add `async` or `defer` to the local scripts without revisiting this ordering.
+`map-theme.js` loads before `app.js`; `calendar.js` and `route-tools.js` follow `app.js`. All local scripts load before the asynchronous Google script so the map callbacks and optional controls are ready. Do not add `async` or `defer` to the local scripts without revisiting this ordering.
+
+## Calendar, weather and map update
+
+The compact calendar sits below the planner controls in a 310px desktop sidebar, leaving more space for the map. The approved map-focus styling is included in styles.css and requires no preview URL or injected script. **Calendar** jumps to the schedule. After planning the final route, choose **Add to calendar**, enter a name and choose one date or an inclusive date range. Nothing is scheduled automatically. A range marks the same route on each selected day; it does not divide stops into daily jobs or calculate arrival times.
+
+Select a scheduled date to open its routes in a small dialog, or a bottom sheet on phones. The saved order is expanded immediately. Close with the × button, Escape or the backdrop. Empty dates show a short message. **Reschedule** changes the name or dates, and **Load route** brings a separate copy into the planner. Use **Keep My Order** to obtain fresh directions without optimizing that order. Loading asks before replacing an existing draft and is blocked during an active trip. Later planner edits do not change the calendar snapshot.
+
+Calendar entries are saved only in this browser/device, up to 500 entries. They do not sync to Google Calendar or other devices and are not included in saved-route JSON backups. Clearing site data can remove them. The update retains existing saved routes and reports.
+
+After planning, open **Weather** above the map or **Weather along your route** below the calendar. Select Start, any numbered stop or Finish, then **Check forecast**. This sends that location's coordinates to the National Weather Service when requested; route names and address lists are not sent to NWS. It shows upcoming day/night forecasts, temperatures, wind and precipitation chances for supported U.S. locations, usually about seven days. These are upcoming forecasts, not forecasts matched to an estimated arrival time or a future calendar date. Results stay in memory for up to ten minutes; a route edit clears the displayed result. Offline or unavailable forecasts do not block route planning.
+
+**Traffic** toggles Google's live traffic layer where available. It does not alter route order or make the existing drive-time estimate traffic-aware. **Show full route** fits all route locations. Map markers use **S** for Start, **F** for Finish and larger, contrasting stop numbers, including three-digit numbers.
+
+Provider references: [NWS API documentation](https://www.weather.gov/documentation/services-web-api), [Google TrafficLayer](https://developers.google.com/maps/documentation/javascript/trafficlayer).
+
+The candidate is prepared for a separate `updated/` path under the current Pages site. Runtime assets use relative paths, and offline caches are scoped to each path. Browser storage is origin-based, so the old and new links on this same origin share saved-route/report storage. Do not install the candidate at the existing root until an intentional replacement is requested. Local review maps are simulated fixtures outside this repository and must never be published.
 
 ## Interface and workflow
 
@@ -42,6 +60,8 @@ Practical import limits: 5 MB file, 5,000 data rows, 100 columns, 100 worksheets
 Only after this optimization are navigation URLs split into overlapping legs. Links contain at most nine intermediate waypoints on desktop or three for recognized mobile browsers/iPads. URL navigation requires internet; Start from my location applies only to the first leg. Unusual browsers that do not identify themselves as mobile may need next-stop navigation. Very long addresses can exceed Google's 2,048-character URL limit; next-stop navigation uses shorter URLs.
 
 Address edits, a newer request, normalization from autocomplete, authentication failure, and request timeouts keep obsolete responses from publishing. Missing or malformed result data does not start a trip. The existing trip snapshots and reports remain available.
+
+New sessions default to the dated U.S. regular national-average fuel reference in the page. Previously remembered device prices do not override that default. Explicitly loaded routes and active trips retain their saved fuel values.
 
 Editing MPG or fuel price refreshes the fuel estimate for a current valid plan without another Maps request. Invalid or overflowing costs show as unavailable. Active trips keep the estimate and fuel settings captured when they started.
 
@@ -80,8 +100,10 @@ References: [Google security guidance](https://developers.google.com/maps/api-se
 Run:
 
 ```text
-node --test --test-isolation=none tests/route-safety.test.cjs tests/branding.test.cjs tests/offline.test.cjs tests/map-theme.test.cjs tests/stop-import.test.cjs
+node --test --test-isolation=none tests/route-tools.test.cjs tests/route-safety.test.cjs tests/branding.test.cjs tests/offline.test.cjs tests/map-theme.test.cjs tests/stop-import.test.cjs
 node --check app.js
+node --check calendar.js
+node --check route-tools.js
 node --check map-theme.js
 node --check service-worker.js
 git diff --check

@@ -16,6 +16,7 @@
     let mapsAuthFailed = false;
 
     function handleMapsLoadFailure() {
+      if (typeof D7RouteTools !== "undefined") D7RouteTools.unavailable();
       clearTimeout(mapsLoadTimer);
       mapsUnavailable = true;
       if (routeRequestPending) {
@@ -85,6 +86,7 @@
         document.getElementById("map-access-note").hidden = true;
       }
       attachAllAutocompletes();
+      if (!mapsAuthFailed && typeof D7RouteTools !== "undefined") D7RouteTools.ready(map, google.maps);
     }
 
 
@@ -144,14 +146,17 @@
     let currentReport = null;
 
     function showView(selected, focusHeading = false) {
-      document.getElementById("journey-controls").hidden = selected !== "plan";
-      for (const name of ["plan", "saved", "reports"]) {
-        document.getElementById(name + "-view").hidden = name !== selected;
+      const panel = selected === "calendar" ? "plan" : selected;
+      document.getElementById("workspace").setAttribute("data-view", selected);
+      document.getElementById("journey-controls").hidden = panel !== "plan";
+      for (const name of ["plan", "saved", "calendar", "reports"]) {
+        document.getElementById(name + "-view").hidden = (name === "calendar" ? "plan" : name) !== panel;
         document.getElementById("view-" + name).setAttribute("aria-current", name === selected ? "page" : "false");
       }
       if (focusHeading) {
-        const id = selected === "plan" ? (tripProgress ? "trip-heading" : "route-heading") : selected === "saved" ? "saved-heading" : "reports-heading";
-        document.getElementById(id).focus();
+        const id = selected === "plan" ? (tripProgress ? "trip-heading" : "route-heading") : selected + "-heading";
+        document.getElementById(id).focus({ preventScroll: selected === "calendar" });
+        if (selected === "calendar") document.getElementById(id).scrollIntoView({ block: "start", behavior: "instant" });
       }
     }
     document.getElementById("view-plan").addEventListener("click", () => showView("plan", true));
@@ -319,6 +324,8 @@
     }
     vehicleMpgInput.addEventListener("input", refreshFuelEstimate);
     fuelPriceInput.addEventListener("input", refreshFuelEstimate);
+    // New sessions use the national-average reference declared in index.html.
+    // Explicit route loads and active-trip snapshots retain their own fuel values.
 
     function newReportId() {
       return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
@@ -611,6 +618,7 @@
     renderReportHistory();
 
     function clearRouteResults() {
+      if (typeof D7RouteTools !== "undefined") D7RouteTools.clear();
       for (const marker of routeMarkers) marker.setMap(null);
       routeMarkers = [];
       if (directionsRenderer) directionsRenderer.setMap(null);
@@ -1574,6 +1582,7 @@
             plannedMinutes: leg.duration.value / 60
           }))
         };
+        if (typeof D7RouteTools !== "undefined") D7RouteTools.setRoute(orderedPoints, allLegs, stopLabels);
         const miles = (totalDistance / 1609.344).toFixed(1);
         const minutes = Math.round(totalDuration / 60);
         const estimate = estimatedFuelCost(Number(miles));

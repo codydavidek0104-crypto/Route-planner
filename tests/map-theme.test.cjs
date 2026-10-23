@@ -73,6 +73,16 @@ test('all twenty intermediate stops keep their real positions and numbers', () =
   }
 });
 
+test('three-digit stop numbers get larger markers and endpoints remain distinct', () => {
+  const { render, created } = setup();
+  const points = Array.from({ length: 502 }, (_, i) => ({ lat: 30 + i / 1000, lng: -120 }));
+  assert.equal(render(route(points)).length, 502);
+  assert.match(decodeURIComponent(created[500].options.icon.url), /width="42"/);
+  assert.match(decodeURIComponent(created[500].options.icon.url), />500<\/text>/);
+  assert.match(decodeURIComponent(created[0].options.icon.url), />S<\/text>/);
+  assert.match(decodeURIComponent(created[501].options.icon.url), />F<\/text>/);
+});
+
 test('missing and invalid route coordinates preserve the renderer fallback without partial markers', () => {
   const valid = { lat: 38.58, lng: -121.49 };
   const cases = [

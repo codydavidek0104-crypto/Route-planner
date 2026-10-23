@@ -30,6 +30,7 @@ function setup(confirmations = [], {
       addEventListener(name, fn) { this.listeners[name] = fn; },
       setAttribute(name, value) { this[name] = value; },
       focus() { focusedElement = this; }, select() {}, scrollIntoView() {},
+      showModal() { this.open = true; }, close() { this.open = false; this.listeners.close?.(); },
     };
   }
   const el = id => {
@@ -106,6 +107,7 @@ function setup(confirmations = [], {
     };
   }
   const context = vm.createContext({
+    crypto: require('node:crypto').webcrypto,
     Date: class extends Date {
       constructor(...args) { super(...(args.length ? args : [initialTime + now])); }
       static now() { return initialTime + now; }
@@ -145,6 +147,8 @@ function setup(confirmations = [], {
   if (mapTheme) vm.runInContext(readFileSync(path.join(__dirname, '../map-theme.js'), 'utf8'), context);
   vm.runInContext(readFileSync(path.join(__dirname, '../stop-import.js'), 'utf8'), context);
   vm.runInContext(readFileSync(path.join(__dirname, '../app.js'), 'utf8'), context);
+  vm.runInContext(readFileSync(path.join(__dirname, '../calendar.js'), 'utf8'), context);
+  vm.runInContext(readFileSync(path.join(__dirname, '../route-tools.js'), 'utf8'), context);
   if (init) vm.runInContext('initMap()', context);
   const click = id => el(id).listeners.click();
   const add = address => { el('stop-input').value = address; click('add-stop'); };
@@ -180,6 +184,173 @@ function setup(confirmations = [], {
 function beginTrip(a) {
   a.calculate(); a.reply(a.requests.length - 1); a.click('start-trip');
 }
+
+function calendarEntries(a) { return JSON.parse(a.stored.d7CalendarV1 || '{"entries":[]}').entries; }
+function schedule(a, start = '2026-10-21', end = start, name = 'Northern stores') {
+  a.click('add-to-calendar');
+  a.el('calendar-name').value = name;
+  a.el('calendar-start').value = start;
+  a.el('calendar-end').value = end;
+  a.el('calendar-editor').listeners.submit({ preventDefault() {} });
+}
+function calendarAction(a, label) {
+  return a.el('calendar-entries').children[0].children.at(-1).children.find(item => item.textContent === label).click();
+}
+
+test('new sessions retain the national-average default despite old device preferences', () => {
+  const stored = { d7FuelPricePreference: '9.99' };
+  const a = setup([], { storage: stored });
+  assert.equal(a.el('fuel-price').value, '4.50', 'Retain the page-provided default used by this fixture');
+  a.el('fuel-price').value = '5.679'; a.el('fuel-price').listeners.input();
+  const b = setup([], { storage: stored });
+  assert.equal(b.el('fuel-price').value, '4.50', 'Reopening must not restore a previous custom price');
+  assert.equal(stored.d7FuelPricePreference, '9.99', 'Leave existing storage intact but unused');
+  const html = readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /id="fuel-price"[^>]*value="4\.2644"/);
+  assert.match(html, /U\.S\. regular national average/);
+});
+
+test('calendar schedules only on explicit submission and retains final order independently', () => {
+  const a = setup(); a.add('Second'); a.calculate(); a.reply(0, 'OK', [1, 0]);
+  assert.equal(calendarEntries(a).length, 0);
+  a.click('add-to-calendar'); a.click('calendar-cancel');
+  assert.equal(calendarEntries(a).length, 0);
+  schedule(a, '2026-10-21', '2026-10-23');
+  const entry = calendarEntries(a)[0];
+  assert.deepEqual(entry.route.stops, ['Second', 'Start']);
+  assert.equal(a.el('calendar-view').hidden, false);
+  assert.match(a.el('calendar-message').textContent, /added/);
+  a.add('Later draft edit');
+  assert.deepEqual(calendarEntries(a)[0], entry);
+  assert.equal(a.stored.d7SavedRoutes, undefined);
+  a.click('calendar-day-2026-10-23');
+  assert.equal(a.el('calendar-entries').children[0].children[0].textContent, 'Northern stores');
+  a.click('calendar-day-2026-10-24');
+  assert.match(a.el('calendar-entries').children[0].textContent, /No routes/);
+});
+
+test('calendar navigation keeps the planner visible and route edits clear weather choices', () => {
+  const a = setup(); a.click('view-calendar');
+  assert.equal(a.el('plan-view').hidden, false);
+  assert.equal(a.el('calendar-view').hidden, false);
+  a.calculate(); a.reply(0, 'OK', undefined, [
+    {distance:{value:1000},duration:{value:100},start_location:{lat:38,lng:-121},end_location:{lat:39,lng:-121}},
+    {distance:{value:1000},duration:{value:100},start_location:{lat:39,lng:-121},end_location:{lat:40,lng:-121}}
+  ]);
+  assert.equal(a.el('weather-stop').children.length,3);
+  assert.equal(a.el('weather-stop').disabled,false);
+  a.destination('A changed finish');
+  assert.equal(a.el('weather-stop').disabled,true);
+  assert.equal(a.el('check-weather').disabled,true);
+});
+
+test('calendar rejects unfinished, stale, duplicate and invalid-date schedules', () => {
+  const a = setup();
+  schedule(a);
+  assert.equal(calendarEntries(a).length, 0);
+  a.calculate(); a.reply(0);
+  schedule(a, '2026-02-30');
+  assert.equal(calendarEntries(a).length, 0);
+  schedule(a, '2026-10-23', '2026-10-21');
+  assert.equal(calendarEntries(a).length, 0);
+  schedule(a); schedule(a);
+  assert.equal(calendarEntries(a).length, 1);
+  assert.match(a.el('calendar-message').textContent, /already scheduled/);
+  a.click('calendar-cancel'); a.destination('Changed finish'); schedule(a, '2026-10-24');
+  assert.equal(calendarEntries(a).length, 1);
+});
+
+test('calendar survives reopening offline and reloads labels and ordered stops without planning', () => {
+  const a = setup();
+  vm.runInContext('stopLabels[0]="Store 123"', a.context);
+  a.calculate(); a.reply(0); schedule(a);
+  const b = setup([], { storage: a.stored, navigatorApi: { onLine: false } });
+  b.click('view-calendar'); b.click('calendar-next'); b.click('calendar-day-2026-10-21');
+  calendarAction(b, 'Load route');
+  assert.equal(b.el('start').value, 'Origin');
+  assert.equal(b.el('destination').value, 'End');
+  assert.equal(vm.runInContext('stopLabels[0]', b.context), 'Store 123');
+  assert.equal(b.requests.length, 0);
+  assert.equal(b.el('plan-view').hidden, false);
+  assert.match(b.el('route-message').textContent, /Keep My Order/);
+});
+
+test('scheduled dates open route details and rescheduling closes the dialog; empty dates stay quiet', () => {
+  const a = setup(); a.calculate(); a.reply(0); schedule(a);
+  a.click('calendar-day-2026-10-21');
+  assert.equal(a.el('calendar-dialog').open, true);
+  assert.equal(a.el('calendar-entries').children[0].children[2].open, true);
+  calendarAction(a, 'Reschedule');
+  assert.equal(a.el('calendar-dialog').open, false);
+  a.click('calendar-cancel');
+  a.click('calendar-day-2026-10-22');
+  assert.equal(a.el('calendar-dialog').open, false);
+  assert.match(a.el('calendar-message').textContent, /No routes scheduled/);
+  a.click('calendar-day-2026-10-21');
+  a.click('calendar-dialog-close');
+  assert.equal(a.el('calendar-dialog').open, false);
+});
+
+test('calendar rescheduling preserves route and entry identity, removal does not touch saves', () => {
+  const a = setup(); a.calculate(); a.reply(0); schedule(a);
+  const before = calendarEntries(a)[0];
+  a.stored.d7SavedRoutes = '{"untouched":true}';
+  calendarAction(a, 'Reschedule');
+  a.el('calendar-start').value = '2026-11-01'; a.el('calendar-end').value = '2026-11-03';
+  a.el('calendar-editor').listeners.submit({ preventDefault() {} });
+  const after = calendarEntries(a)[0];
+  assert.equal(after.id, before.id); assert.deepEqual(after.route, before.route);
+  assert.equal(after.startDate, '2026-11-01'); assert.equal(calendarEntries(a).length, 1);
+  calendarAction(a, 'Remove');
+  assert.equal(calendarEntries(a).length, 0);
+  assert.equal(a.stored.d7SavedRoutes, '{"untouched":true}');
+});
+
+test('calendar storage failures preserve existing entries and unsaved editor', () => {
+  const a = setup(); a.calculate(); a.reply(0); schedule(a);
+  const before = a.stored.d7CalendarV1;
+  calendarAction(a, 'Reschedule');
+  a.el('calendar-start').value = '2026-10-22'; a.el('calendar-end').value = '2026-10-22';
+  vm.runInContext('localStorage.setItem = () => { throw new Error("Storage full"); }', a.context);
+  a.el('calendar-editor').listeners.submit({ preventDefault() {} });
+  assert.equal(a.stored.d7CalendarV1, before);
+  assert.equal(a.el('calendar-editor').hidden, false);
+  assert.match(a.el('calendar-message').textContent, /Could not save/);
+});
+
+test('calendar does not overwrite malformed storage or concurrent reschedules', () => {
+  const a = setup(); a.calculate(); a.reply(0); schedule(a);
+  calendarAction(a, 'Reschedule');
+  const changed = JSON.parse(a.stored.d7CalendarV1);
+  changed.entries[0].name = 'Changed in another tab';
+  a.stored.d7CalendarV1 = JSON.stringify(changed);
+  a.el('calendar-editor').listeners.submit({ preventDefault() {} });
+  assert.match(a.el('calendar-message').textContent, /another tab/);
+  assert.equal(calendarEntries(a)[0].name, 'Changed in another tab');
+  a.stored.d7CalendarV1 = '{invalid'; a.click('view-calendar');
+  assert.match(a.el('calendar-message').textContent, /Could not open/);
+  assert.equal(a.stored.d7CalendarV1, '{invalid');
+});
+
+test('calendar month navigation handles leap days and December rollover', () => {
+  const a = setup(); a.calculate(); a.reply(0); schedule(a, '2028-02-29');
+  assert.equal(a.el('calendar-day-2028-02-29').textContent, '29');
+  assert.match(a.el('calendar-month').textContent, /2028/);
+  schedule(a, '2028-12-31'); a.click('calendar-next');
+  assert.match(a.el('calendar-month').textContent, /2029/);
+  a.click('calendar-previous');
+  assert.equal(a.el('calendar-day-2028-12-31').textContent, '31');
+});
+
+test('calendar load cancellation and active trips protect current planner', () => {
+  const a = setup([false]); a.calculate(); a.reply(0); schedule(a);
+  a.destination('Unsaved draft'); calendarAction(a, 'Load route');
+  assert.equal(a.el('destination').value, 'Unsaved draft');
+  a.calculate(); a.reply(1); a.click('start-trip');
+  calendarAction(a, 'Load route');
+  assert.match(a.el('calendar-message').textContent, /active trip/);
+  assert.equal(a.el('destination').value, 'Unsaved draft');
+});
 
 function bulkStops(a,count) {
   const names=Array.from({length:count},(_,i)=>`Stop ${i+1}`);
