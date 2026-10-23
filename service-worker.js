@@ -3,7 +3,7 @@
 const SCOPE = self.registration.scope;
 const CACHE_PREFIX = `d7-shell-${encodeURIComponent(new URL(SCOPE).pathname)}-`;
 // Bump this version whenever any shell file changes in a release.
-const CACHE_NAME = `${CACHE_PREFIX}v34`;
+const CACHE_NAME = `${CACHE_PREFIX}v35`;
 const SHELL_FILES = [
   './', 'index.html', 'styles.css', 'map-theme.js', 'app.js', 'calendar.js', 'route-tools.js', 'stop-import.js', 'vendor/exceljs.min.js', 'manifest.webmanifest',
   'favicon.svg', 'favicon-32.png', 'favicon.ico',
