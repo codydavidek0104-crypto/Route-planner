@@ -197,6 +197,21 @@ function calendarAction(a, label) {
   return a.el('calendar-entries').children[0].children.at(-1).children.find(item => item.textContent === label).click();
 }
 
+test('fuel preference survives reopening with two decimals and ignores invalid edits', () => {
+  const a = setup();
+  a.el('fuel-price').value = '5.679'; a.el('fuel-price').listeners.change();
+  assert.equal(a.el('fuel-price').value, '5.68');
+  assert.equal(a.stored.d7FuelPricePreference, '5.68');
+  a.el('fuel-price').value = ''; a.el('fuel-price').listeners.change();
+  assert.equal(a.stored.d7FuelPricePreference, '5.68');
+  const b = setup([], { storage: a.stored });
+  assert.equal(b.el('fuel-price').value, '5.68');
+  vm.runInContext('localStorage.setItem = () => { throw new Error("Unavailable"); }', b.context);
+  b.el('fuel-price').value = '4.2'; b.el('fuel-price').listeners.change();
+  assert.equal(b.el('fuel-price').value, '4.20');
+  assert.match(b.el('fuel-price-source').textContent, /session/);
+});
+
 test('calendar schedules only on explicit submission and retains final order independently', () => {
   const a = setup(); a.add('Second'); a.calculate(); a.reply(0, 'OK', [1, 0]);
   assert.equal(calendarEntries(a).length, 0);

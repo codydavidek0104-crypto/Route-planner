@@ -1,0 +1,12 @@
+{
+  "name": "d7-instruction-preview",
+  "main": "index.mjs",
+  "compatibility_date": "2026-10-22",
+  "workers_dev": false,
+  "vars": {
+    "ENABLED": "false",
+    "ALLOWED_ORIGIN": "http://127.0.0.1:4188"
+  },
+  "durable_objects": { "bindings": [{ "name": "LIMITS", "class_name": "ConversionLimits" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ConversionLimits"] }]
+}

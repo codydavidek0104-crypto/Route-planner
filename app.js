@@ -155,8 +155,8 @@
       }
       if (focusHeading) {
         const id = selected === "plan" ? (tripProgress ? "trip-heading" : "route-heading") : selected + "-heading";
-        document.getElementById(id).focus();
-        if (selected === "calendar") document.getElementById(id).scrollIntoView({ block: "start" });
+        document.getElementById(id).focus({ preventScroll: selected === "calendar" });
+        if (selected === "calendar") document.getElementById(id).scrollIntoView({ block: "start", behavior: "instant" });
       }
     }
     document.getElementById("view-plan").addEventListener("click", () => showView("plan", true));
@@ -324,6 +324,27 @@
     }
     vehicleMpgInput.addEventListener("input", refreshFuelEstimate);
     fuelPriceInput.addEventListener("input", refreshFuelEstimate);
+    // Remember only explicit user price edits; saved routes/trips keep their own values.
+    const fuelPreferenceKey = "d7FuelPricePreference";
+    try {
+      const remembered = positiveNumber(localStorage.getItem(fuelPreferenceKey));
+      if (remembered && remembered >= 0.01 && remembered < 1e21) {
+        fuelPriceInput.value = remembered.toFixed(2);
+        document.getElementById("fuel-price-source").textContent = "Your last entered price, saved on this device.";
+      }
+    } catch { /* Storage can be unavailable; retain the editable starting value. */ }
+    fuelPriceInput.addEventListener("change", () => {
+      const price = positiveNumber(fuelPriceInput.value);
+      if (!price || price < 0.01 || price >= 1e21) return;
+      fuelPriceInput.value = price.toFixed(2);
+      try {
+        localStorage.setItem(fuelPreferenceKey, fuelPriceInput.value);
+        document.getElementById("fuel-price-source").textContent = "Your last entered price, saved on this device.";
+      } catch {
+        document.getElementById("fuel-price-source").textContent = "Your price for this session. Browser storage is unavailable.";
+      }
+      refreshFuelEstimate();
+    });
 
     function newReportId() {
       return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
@@ -1408,6 +1429,7 @@
     }
 
     function calculateRoute(optimize = false) {
+      if (typeof D7InstructionAssistant !== 'undefined' && !D7InstructionAssistant.beforePlan()) return;
       pendingRouteOptimize = optimize;
       // Only the latest request may publish results, including repeated clicks.
       const requestId = ++routeRequestId;
