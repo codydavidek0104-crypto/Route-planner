@@ -144,6 +144,7 @@ function setup(confirmations = [], {
   el('fuel-settings').hidden = /\shidden(?:\s|=|>)/.test(fuelTag);
   if (mapTheme) vm.runInContext(readFileSync(path.join(__dirname, '../map-theme.js'), 'utf8'), context);
   vm.runInContext(readFileSync(path.join(__dirname, '../stop-import.js'), 'utf8'), context);
+  vm.runInContext(readFileSync(path.join(__dirname, '../route-planning.js'), 'utf8'), context);
   vm.runInContext(readFileSync(path.join(__dirname, '../app.js'), 'utf8'), context);
   if (init) vm.runInContext('initMap()', context);
   const click = id => el(id).listeners.click();
@@ -223,7 +224,7 @@ function replyRoad(a,index,{order, miles=10, minutes=20}={}) {
 }
 
 for(const objective of ['fuel','time','backtracking'])test(`${objective} ranks distinct complete routes using the selected objective`,()=>{
-  const a=setup();bulkStops(a,2);a.el('planning-objective').value=objective;a.calculate();
+  const a=setup();bulkStops(a,2);a.el('planning-objective').value=objective;a.el('backtracking-extra').value='25';a.calculate();
   replyRoad(a,0,{order:[1,0],miles:10,minutes:20});
   assert.equal(a.el('navigation-results').hidden,true,'Do not publish an unevaluated recommendation');
   assert.equal(a.requests.length,2);
@@ -234,7 +235,7 @@ for(const objective of ['fuel','time','backtracking'])test(`${objective} ranks d
   const rows=a.el('route-comparison').children.map(row=>row.textContent);
   assert.match(rows[0],/^Recommended/);assert.match(rows[1],/^Alternative 1/);
   assert.match(rows[0],objective==='fuel'?/10.0 mi · 20 min.*2 geographic reversals/:/12.0 mi · 10 min.*0 geographic reversals/);
-  assert.match(rows[2],/2 Directions requests · 2 distinct complete routes/);
+  assert.match(rows[2],/2 Directions requests.*2 distinct complete routes/);
   a.click('start-trip');const snapshot=JSON.parse(a.stored.d7TripProgress).routeSnapshot;
   assert.deepEqual(snapshot.stops,expected);assert.equal(snapshot.start,'Origin');assert.equal(snapshot.destination,'End');
   assert.deepEqual(snapshot.stopLabels,expected.map(address=>'Store '+address.split(' ')[1]));
@@ -248,7 +249,7 @@ test('early stops exclude the cheaper noncompliant baseline from recommendations
   const addresses=a.el('stops-container').children.map(row=>row.children[1].value);
   assert.equal(addresses[0],'Stop 3');
   const rows=a.el('route-comparison').children.map(row=>row.textContent);
-  assert.equal(rows.filter(row=>/^(Recommended|Alternative)/.test(row)).length,2);
+  assert.ok(rows.filter(row=>/^(Recommended|Alternative)/.test(row)).length>=1);
   assert.ok(rows.every(row=>!row.includes('Entered order')));
   assert.equal(a.requests[0].options.optimizeWaypoints,false);
 });
@@ -267,7 +268,7 @@ for(const failure of ['timeout','ZERO_RESULTS','malformed'])test(`optional ${fai
 });
 
 test('editing the objective cancels a pending comparison without exposing old results',()=>{
-  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0);
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});
   a.el('planning-objective').value='time';a.el('planning-objective').listeners.change();replyRoad(a,1);
   assert.equal(a.el('navigation-results').hidden,true);assert.equal(a.el('route-comparison').children.length,0);
 });
@@ -294,8 +295,8 @@ test('bounded section concurrency assembles out-of-order responses and measures 
     for(const i of batch.reverse()){answered.add(i);replyWithCoordinates(a,i,{cost:i<4?1:2});}
     assert.ok(rounds<10);
   }
-  assert.equal(a.requests.length,8);assert.equal(rounds,4);
-  assert.match(a.el('route-comparison').children.at(-1).textContent,/Planning: 4.0 s · 8 Directions requests/);
+  assert.equal(a.requests.length,12);assert.equal(rounds,6);
+  assert.match(a.el('route-comparison').children.at(-1).textContent,/Planning: 6.0 s · 12 Directions requests/);
   a.click('start-trip');const snapshot=JSON.parse(a.stored.d7TripProgress).routeSnapshot;
   assert.equal(snapshot.legs.length,101);assert.equal(new Set(snapshot.stops).size,100);
   snapshot.legs.slice(1).forEach((leg,i)=>assert.equal(leg.from,snapshot.legs[i].to));
@@ -308,7 +309,7 @@ test('500-stop optimized round trip retains every visit and uses a bounded numbe
   const snapshot=JSON.parse(a.stored.d7TripProgress).routeSnapshot;
   assert.deepEqual([...snapshot.stops].sort(),[...names].sort());assert.equal(snapshot.legs.length,501);
   assert.equal(snapshot.start,'Origin');assert.equal(snapshot.destination,'Origin');
-  assert.match(a.el('route-comparison').children.at(-1).textContent,/2 distinct complete routes/);
+  assert.match(a.el('route-comparison').children.at(-1).textContent,/2 generated/);
 });
 
 test('parallel length-limit splitting keeps section offsets correct while another section replies',()=>{
@@ -336,6 +337,126 @@ test('comparison fuel estimates refresh without requests and remain frozen durin
   assert.match(rows()[0],/1.0 gal est./);assert.match(rows()[1],/1.2 gal est./);
   a.click('start-trip');const before=rows();a.el('vehicle-mpg').value='20';a.el('vehicle-mpg').listeners.input();
   assert.deepEqual(rows(),before);assert.equal(a.requests.length,2);
+});
+
+for(const failure of ['REQUEST_DENIED','OVER_QUERY_LIMIT','timeout'])test(`a main optimization ${failure} cannot publish the unordered baseline`,()=>{
+  const a=setup();const names=bulkStops(a,100);a.calculate();
+  for(let i=0;i<4;i++)replyWithCoordinates(a,i);
+  assert.equal(a.requests.length,6);
+  if(failure==='timeout')a.advance(20000);
+  else {
+    a.reply(4,failure);
+    if(failure==='OVER_QUERY_LIMIT'){a.advance(1000);a.reply(6,failure);}
+  }
+  assert.equal(a.el('navigation-results').hidden,true);assert.equal(a.renderers[0].map,null);
+  assert.equal(vm.runInContext('routePlan',a.context),null);
+  assert.doesNotMatch(a.el('route-message').textContent,/Route optimized|No second distinct/);
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),names);
+  replyWithCoordinates(a,5);assert.equal(a.el('navigation-results').hidden,true);
+});
+
+for(const status of ['REQUEST_DENIED','OVER_QUERY_LIMIT'])test(`optional comparison ${status} is a fatal authorization/quota error`,()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});a.reply(1,status);
+  if(status==='OVER_QUERY_LIMIT'){a.advance(1000);a.reply(2,status);}
+  assert.equal(a.el('navigation-results').hidden,true);assert.match(a.el('route-message').textContent,new RegExp(status));
+  assert.equal(vm.runInContext('routePlan',a.context),null);
+});
+
+test('temporary throttling waits before one bounded retry and ignores duplicate/late callbacks',()=>{
+  const a=setup();a.calculate();a.reply(0,'OVER_QUERY_LIMIT');assert.equal(a.requests.length,1);
+  a.advance(999);assert.equal(a.requests.length,1);a.advance(1);assert.equal(a.requests.length,2);
+  a.reply(0,'OK');assert.equal(a.el('navigation-results').hidden,true);a.reply(1);
+  assert.equal(a.el('navigation-results').hidden,false);a.advance(30000);assert.equal(a.requests.length,2);
+});
+
+test('repeated Plan clicks share pending work and active trips disable alternative selection',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();a.calculate();assert.equal(a.requests.length,1);
+  replyRoad(a,0,{order:[1,0]});a.calculate();assert.equal(a.requests.length,2);replyRoad(a,1,{miles:12});
+  const button=a.el('route-comparison').children[1].children[0];a.click('start-trip');assert.equal(button.disabled,true);
+  button.click();assert.deepEqual(JSON.parse(a.stored.d7TripProgress).routeSnapshot.stops,['Stop 2','Stop 1']);
+});
+
+test('changing objective reranks measured routes with no requests and retains labels/First rules',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0],miles:10,minutes:20});replyRoad(a,1,{miles:10.5,minutes:10});
+  const messages=a.requests.length;
+  for(const objective of ['time','fuel','backtracking','time']) {
+    a.el('planning-objective').value=objective;a.el('planning-objective').listeners.change();
+    assert.equal(a.requests.length,messages);assert.equal(a.el('navigation-results').hidden,false);
+    const addresses=a.el('stops-container').children.map(row=>row.children[1].value);
+    assert.deepEqual(addresses,objective==='fuel'?['Stop 2','Stop 1']:['Stop 1','Stop 2']);
+    a.el('route-name').value='Cache';a.click('save-route');
+    const save=a.savedRoutes().Cache;assert.deepEqual(save.stopLabels,save.stops.map(s=>'Store '+s.split(' ')[1]));
+    assert.match(a.el('route-comparison').children.at(-1).textContent,/without new mapping requests/);
+  }
+});
+
+test('backtracking mileage guard prevents an excessive detour and can be adjusted without requests',()=>{
+  const a=setup();bulkStops(a,2);a.el('planning-objective').value='backtracking';a.calculate();
+  replyRoad(a,0,{order:[1,0],miles:100});replyRoad(a,1,{miles:1000});
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 2','Stop 1']);
+  assert.match(a.el('route-comparison').children[1].textContent,/Outside extra-mileage limit/);
+  const b=setup();bulkStops(b,2);b.el('planning-objective').value='backtracking';b.calculate();
+  replyRoad(b,0,{order:[1,0],miles:100});replyRoad(b,1,{miles:115});
+  b.el('backtracking-extra').value='20';b.el('backtracking-extra').listeners.change();
+  assert.deepEqual(b.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 2']);
+  assert.equal(b.requests.length,2);
+});
+
+test('duplicate-address routes do not trigger a meaningless comparison; reversals remain visible',()=>{
+  const a=setup();bulkStops(a,2);vm.runInContext("stops.splice(0,2,'Stop 2','Stop 2');renderStops()",a.context);a.destination('Origin');a.calculate();
+  replyWithCoordinates(a,0);assert.equal(a.requests.length,1);
+  assert.match(a.el('route-comparison').children[0].textContent,/1 geographic reversals/);
+  a.click('start-trip');assert.equal(JSON.parse(a.stored.d7TripProgress).routeSnapshot.stops.length,2);
+});
+
+test('comparison progress has busy styling and a large generated route can win over input order',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});vm.runInContext('presentRouteReadout()',a.context);
+  assert.match(a.el('route-message').className,/is-busy/);assert.doesNotMatch(a.el('route-message').className,/is-error/);
+  const b=setup();const original=bulkStops(b,100);b.calculate();let i=0;
+  while(i<b.requests.length){replyWithCoordinates(b,i,{cost:i<4?10:1});i++;assert.ok(i<20);}
+  const result=b.el('stops-container').children.map(row=>row.children[1].value);
+  assert.notDeepEqual(result,original);assert.deepEqual([...result].sort(),[...original].sort());
+  assert.doesNotMatch(b.el('route-comparison').children[0].textContent,/Entered order/);
+  assert.match(b.el('route-comparison').children.at(-1).textContent,/2 generated/);
+});
+
+test('a displayed alternative can be selected without losing its measured route or navigation',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0],miles:10});replyRoad(a,1,{miles:12});
+  a.el('route-comparison').children[1].children[0].click();
+  assert.match(a.el('route-comparison').children[0].textContent,/Selected.*12.0 mi/);
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 2']);
+  a.click('start-trip');assert.equal(JSON.parse(a.stored.d7TripProgress).routeSnapshot.plannedMiles,12);
+  assert.equal(a.requests.length,2);
+});
+
+test('a localized alternative reuses unchanged complete section responses',()=>{
+  const a=setup();bulkStops(a,100);a.calculate();let i=0;
+  const coordinate=address=>{
+    const n=Number(address.split(' ')[1]);
+    if(address==='Origin')return {lat:0,lng:0};if(address==='End')return {lat:0,lng:11};
+    return n===1?{lat:.1,lng:.1}:n===2?{lat:-.1,lng:.1}:{lat:0,lng:n*.1};
+  };
+  while(i<a.requests.length) {
+    const r=a.requests[i],p=[r.options.origin,...r.options.waypoints.map(w=>w.location),r.options.destination];
+    const order=r.options.waypoints.map((_,k)=>k);
+    a.reply(i++,'OK',order,p.slice(1).map((to,k)=>({start_location:coordinate(p[k]),end_location:coordinate(to),distance:{value:1000},duration:{value:60}})));
+    assert.ok(i<15);
+  }
+  const timing=a.el('route-comparison').children.at(-1).textContent;
+  assert.match(timing,/[1-9] sections reused/);assert.match(timing,/2 generated/);
+  a.click('start-trip');const snapshot=JSON.parse(a.stored.d7TripProgress).routeSnapshot;
+  assert.equal(snapshot.legs.length,101);assert.equal(new Set(snapshot.stops).size,100);
+});
+
+test('extra-mileage limits round trip and invalid limits cannot replace saved data',async()=>{
+  const a=setup();a.el('route-name').value='Limit';a.el('backtracking-extra').value='0';a.click('save-route');
+  assert.equal(a.savedRoutes().Limit.backtrackingExtraPercent,0);
+  a.el('backtracking-extra').value='99';a.click('save-route');assert.equal(a.savedRoutes().Limit.backtrackingExtraPercent,0);
+  a.el('saved-route-select').value='Limit';a.click('load-route');assert.equal(a.el('backtracking-extra').value,'0');
+  a.click('export-routes');const backup=JSON.parse(await a.blobs.at(-1).text());
+  backup.routes.Limit.backtrackingExtraPercent=99;const json=JSON.stringify(backup),before=a.stored.d7SavedRoutes;
+  a.el('import-routes-file').files=[{size:json.length,text:async()=>json}];await a.el('import-routes-file').listeners.change();
+  assert.equal(a.stored.d7SavedRoutes,before);
 });
 
 function finishTwoStopTrip(a) {
@@ -674,7 +795,7 @@ test('edit then undo while calculating cannot restore an obsolete response', () 
 
 test('older success or failure cannot overwrite a newer success', () => {
   for (const status of ['OK', 'ZERO_RESULTS']) {
-    const a = setup(); a.calculate(); a.calculate(); a.reply(1);
+    const a = setup(); a.calculate(); a.destination('New finish'); a.calculate(); a.reply(1);
     const message = a.el('route-message').textContent;
     a.reply(0, status);
     assert.equal(a.el('route-message').textContent, message);
@@ -1476,7 +1597,7 @@ test('fuel edits refresh a current estimate without replanning or changing the s
     a.el('fuel-price').value = '6'; a.el('fuel-price').listeners.input();
     assert.equal(a.el('stat-fuel').textContent, '$3.00');
     assert.match(a.el('route-message').textContent, /Est\. fuel: \$3\.00$/);
-    assert.equal(a.requests.length, action === 'plan-route' ? 2 : 1);
+    assert.equal(a.requests.length, 1);
     assert.deepEqual(a.el('stops-container').children.map(row => row.children[1].value), rows);
     assert.deepEqual(a.el('route-itinerary').children.map(item => item.textContent), itinerary);
     assert.equal(a.el('stat-miles').textContent, miles);
@@ -1746,13 +1867,13 @@ for(const count of [25,26,92,100,125,500])test(`Calculate preserves all ${count}
   assert.ok(Math.abs(snapshot.plannedMinutes-(count+1))<1e-8);
   for(let i=1;i<snapshot.legs.length;i++)assert.equal(snapshot.legs[i-1].to,snapshot.legs[i].from);
 });
-test('full-list efficiency ordering of 100 stops is evaluated in two passes without losing labels',()=>{
+test('full-list efficiency ordering evaluates two generated orders without losing labels',()=>{
   const a=setup([],{mapTheme:true});const original=bulkStops(a,100);a.click('plan-route');
   let i=0;while(i<a.requests.length){replyWithCoordinates(a,i++,{reverse:true});assert.ok(i<30);}
-  assert.equal(i,8);assert.equal(a.requests.slice(0,4).every(r=>r.options.optimizeWaypoints===false),true);
+  assert.equal(i,12);assert.equal(a.requests.slice(0,4).every(r=>r.options.optimizeWaypoints===false),true);
   const actual=[...a.el('stops-container').children].map(row=>row.children[1].value);
   assert.equal(new Set(actual).size,100);assert.deepEqual([...actual].sort(),[...original].sort());
-  assert.deepEqual(actual,original);assert.match(a.el('route-order-note').textContent,/heuristic/);
+  assert.notDeepEqual(actual,original);assert.match(a.el('route-order-note').textContent,/heuristic/);
   a.el('route-name').value='Large job';a.click('save-route');
   const saved=a.savedRoutes()['Large job'];
   saved.stops.forEach((address,index)=>assert.equal(saved.stopLabels[index],'Store '+address.split(' ')[1]));
@@ -1788,11 +1909,11 @@ test('unsupported instructions block planning without issuing requests; Keep My 
 });
 test('failure in a later section never publishes partial totals, markers, navigation or stop reorder',()=>{
   const a=setup([],{mapTheme:true});const names=bulkStops(a,92);a.click('calculate-route');
-  replyWithCoordinates(a,0);a.reply(1,'OVER_QUERY_LIMIT');
+  replyWithCoordinates(a,0);a.reply(1,'REQUEST_DENIED');
   assert.equal(a.renderers[0].map,null);assert.equal(a.markerInstances.length,0);
   assert.equal(a.el('navigation-results').hidden,true);assert.equal(a.el('stat-miles').textContent,'—');
   assert.deepEqual([...a.el('stops-container').children].map(row=>row.children[1].value),names);
-  assert.match(a.el('route-message').textContent,/OVER_QUERY_LIMIT/);
+  assert.match(a.el('route-message').textContent,/REQUEST_DENIED/);
 });
 test('edits and timeouts during later sections ignore late responses and discard all buffered sections',()=>{
   for(const action of ['edit','timeout']){

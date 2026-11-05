@@ -8,6 +8,8 @@
     let sectionRenderers = [];
     let routeMarkers = [];
     let refreshRouteComparison = null;
+    let rerankRouteCandidates = null;
+    let routeAlternativeButtons = [];
     const MAPS_LOAD_TIMEOUT_MS = 15000;
     const ROUTE_REQUEST_TIMEOUT_MS = 20000;
     const MAPS_UNAVAILABLE_MESSAGE =
@@ -222,6 +224,7 @@
     }
 
     function renderTrip() {
+      for(const button of routeAlternativeButtons)button.disabled=!!tripProgress;
       tripPanel.hidden = !tripProgress;
       document.getElementById("planner-fields").hidden = !!tripProgress;
       document.getElementById("planner-actions").hidden = !!tripProgress;
@@ -624,6 +627,8 @@
       document.getElementById("route-order-note").textContent = "";
       document.getElementById("route-comparison").innerHTML = "";
       refreshRouteComparison = null;
+      rerankRouteCandidates = null;
+      routeAlternativeButtons = [];
       navigationResults.hidden = true;
       navigationControls.innerHTML = "";
       routeMessage.textContent = "";
@@ -962,6 +967,10 @@
           if (!["fuel", "time", "backtracking"].includes(route.planningObjective)) throw new Error("Unknown planning objective.");
           preferences.planningObjective = route.planningObjective;
         }
+        if (route.backtrackingExtraPercent != null) {
+          if (!Number.isFinite(route.backtrackingExtraPercent) || route.backtrackingExtraPercent<0 || route.backtrackingExtraPercent>50) throw new Error("Invalid extra-mileage limit.");
+          preferences.backtrackingExtraPercent = route.backtrackingExtraPercent;
+        }
         if (route.stopFirst != null) {
           if(!Array.isArray(route.stopFirst) || route.stopFirst.length!==route.stops.length || route.stopFirst.some(v=>typeof v!=="boolean"))
             throw new Error("First-stop flags must match the stops.");
@@ -1108,6 +1117,8 @@
 
       try { D7Import.instructions(document.getElementById("route-instructions").value || "", stops.length); }
       catch(error) { routeMessage.textContent=error.message; return; }
+      const extra=Number(document.getElementById("backtracking-extra").value || "10");
+      if(!Number.isFinite(extra) || extra<0 || extra>50){routeMessage.textContent="Enter an extra-mileage limit from 0 to 50 percent.";return;}
       const savedRoutes = getSavedRoutes();
       if (Object.prototype.hasOwnProperty.call(savedRoutes, name) &&
         !window.confirm(`Replace the saved route “${name}”?`)) {
@@ -1117,6 +1128,7 @@
 
       savedRoutes[name] = {
         planningObjective: document.getElementById("planning-objective").value || "fuel",
+        backtrackingExtraPercent: extra,
         start,
         stops: [...stops],
         ...(stopLabels.some(Boolean) ? { stopLabels: [...stopLabels] } : {}),
@@ -1184,6 +1196,7 @@
       vehicleMpgInput.value = savedRoute.vehicleMpg || "15";
       fuelPriceInput.value = savedRoute.fuelPrice || "4.50";
       document.getElementById("planning-objective").value = savedRoute.planningObjective || "fuel";
+      document.getElementById("backtracking-extra").value = String(savedRoute.backtrackingExtraPercent ?? 10);
       routeNameInput.value = name;
       renderStops();
       showView("plan", true);
@@ -1237,6 +1250,7 @@
       }
       const count = stops.filter((_,i)=>stopFirst[i] || parsed.first.includes(i+1)).length;
       const objectiveLabel = {fuel:"estimated fuel",time:"driving time",backtracking:"less backtracking"}[document.getElementById("planning-objective").value || "fuel"];
+      document.getElementById("backtracking-settings").hidden = document.getElementById("planning-objective").value !== "backtracking";
       document.getElementById("priority-summary").textContent =
         `${parsed.first.length ? "Do stops " + parsed.first.join(", ") + " first; " : count ? count + " selected stops first; " : ""}${priority==="north" ? "stops at or above latitude " + cutoff + " before southern stops; " : priority==="south" ? "stops below latitude " + cutoff + " before northern stops; " : ""}then compare routes for ${objectiveLabel}. Keep My Order ignores priority rules and preserves your exact entered order.`;
     }
@@ -1356,70 +1370,28 @@
         stopInput.focus();
         return;
       }
+      if(routeRequestPending && pendingRouteOptimize===optimize)return;
       calculateRoute(optimize);
     }
     planButton.addEventListener("click", () => planRoute(true));
-    document.getElementById("planning-objective").addEventListener("change", () => { invalidateRoute(); updatePrioritySummary(); });
-    document.getElementById("calculate-route").addEventListener("click", () => planRoute(false));
-
-    // A full-list heuristic, not a claim of shortest driving distance. Initial
-    // Directions legs provide coordinates using the existing enabled service.
-    function geographicStopOrder(legs, firstFlags = [], priority = "efficiency", cutoff = 40) {
-      function coordinate(location) {
-        if (!location) return null;
-        const lat = typeof location.lat === "function" ? location.lat() : location.lat;
-        const lng = typeof location.lng === "function" ? location.lng() : location.lng;
-        return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
-          ? { lat: lat * Math.PI / 180, lng: lng * Math.PI / 180 } : null;
-      }
-      const points = [coordinate(legs[0].start_location), ...legs.map(leg => coordinate(leg.end_location))];
-      if (points.some(point => !point)) return null;
-      const distance = (a, b) => {
-        const x = points[a], y = points[b];
-        const v = Math.sin((x.lat-y.lat)/2)**2 + Math.cos(x.lat)*Math.cos(y.lat)*Math.sin((x.lng-y.lng)/2)**2;
-        return 2 * Math.asin(Math.sqrt(Math.min(1, Math.max(0, v))));
-      };
-      const tier = index => firstFlags[index-1] ? 0 : priority === "north"
-        ? (points[index].lat*180/Math.PI >= cutoff ? 1:2)
-        : priority === "south" ? (points[index].lat*180/Math.PI < cutoff ? 1:2) : 1;
-      const remaining = new Set(Array.from({ length: points.length-2 }, (_, i) => i+1));
-      const order = [0];
-      while (remaining.size) {
-        let closest, best = Infinity;
-        const nextTier = Math.min(...[...remaining].map(tier));
-        for (const candidate of remaining) {
-          if(tier(candidate)!==nextTier)continue;
-          const cost = distance(order[order.length-1], candidate);
-          if (cost < best) { closest = candidate; best = cost; }
-        }
-        remaining.delete(closest); order.push(closest);
-      }
-      order.push(points.length-1);
-      // Bounded 2-opt improvement keeps both endpoints fixed.
-      for (let pass = 0; pass < 4; pass++) {
-        let changed = false;
-        for (let i = 1; i < order.length-2; i++) {
-          for (let j = i+1; j < order.length-1; j++) {
-            if(tier(order[i])!==tier(order[j]))break;
-            const old = distance(order[i-1],order[i]) + distance(order[j],order[j+1]);
-            const next = distance(order[i-1],order[j]) + distance(order[i],order[j+1]);
-            if (next + 1e-12 < old) {
-              order.splice(i,j-i+1,...order.slice(i,j+1).reverse()); changed = true;
-            }
-          }
-        }
-        if (!changed) break;
-      }
-      return { indices: order.slice(1,-1).map(index => index-1), tiers: firstFlags.map((_,i)=>tier(i+1)) };
+    function changePlanningObjective() {
+      if (routeShown && !routeRequestPending && !tripProgress && rerankRouteCandidates) rerankRouteCandidates();
+      else invalidateRoute();
+      updatePrioritySummary();
     }
+    document.getElementById("planning-objective").addEventListener("change", changePlanningObjective);
+    document.getElementById("backtracking-extra").addEventListener("change", changePlanningObjective);
+    document.getElementById("calculate-route").addEventListener("click", () => planRoute(false));
 
     function calculateRoute(optimize = false) {
       const planningStarted = Date.now();
       let directionsRequests = 0;
       const candidates = [];
       let publishing = false;
+      let manualSelection = false, elapsed = null;
       let comparisonWarning = "";
-      const objective = document.getElementById("planning-objective").value || "fuel";
+      let objective = document.getElementById("planning-objective").value || "fuel";
+      let extraPercent = Number(document.getElementById("backtracking-extra").value || "10");
       pendingRouteOptimize = optimize;
       // Only the latest request may publish results, including repeated clicks.
       const requestId = ++routeRequestId;
@@ -1481,13 +1453,18 @@
       }
       const constrained = priority!=="efficiency" || requestedFirst.some(Boolean);
       if (!["fuel", "time", "backtracking"].includes(objective)) { routeMessage.textContent = "Choose a supported planning objective."; return; }
+      if (!Number.isFinite(extraPercent) || extraPercent<0 || extraPercent>50) { routeMessage.textContent="Enter an extra-mileage limit from 0 to 50 percent."; return; }
       let tiers = requestedStops.map(()=>1);
       let sectionOffsets = [];
       let activeIndices = requestedStops.map((_, i) => i);
       let phase = optimize && (requestedStops.length > DIRECTIONS_WAYPOINT_LIMIT || constrained) ? "baseline" : "final";
       let sections;
+      let model = null, comparisonReason = "", reusedSections = 0, passSerial = 0;
+      let quotaRetries = 0, paused = false, pauseUntil = 0;
+      const retryCounts = new Map(), sectionCache = new Map();
       let sentSections, inFlightSections, sectionResults;
       function buildSections(indices) {
+        passSerial++;
         sentSections=new Set(); inFlightSections=new Set(); sectionResults=new Map();
         activeIndices = indices;
         const points = [origin, ...indices.map(i => requestedStops[i].trim()), destination];
@@ -1523,42 +1500,49 @@
         const distance = allLegs.reduce((sum,leg)=>sum+leg.distance.value,0);
         const duration = allLegs.reduce((sum,leg)=>sum+leg.duration.value,0);
         if (!Number.isFinite(distance) || !Number.isFinite(duration)) return;
-        let turns = 0;
-        const coord = loc => loc && [typeof loc.lat === "function" ? loc.lat() : loc.lat, typeof loc.lng === "function" ? loc.lng() : loc.lng];
-        const points = [coord(allLegs[0].start_location), ...allLegs.map(leg=>coord(leg.end_location))];
-        const hasCoordinates = points.every(p=>p && p.every(Number.isFinite) && Math.abs(p[0])<=90 && Math.abs(p[1])<=180);
-        if (hasCoordinates) for(let i=1;i<points.length-1;i++) {
-          // A geographic reversal is a >90-degree heading change at a stop.
-          // This is a transparent proxy, not road overlap or turn-by-turn analysis.
-          const [a,b,c] = points.slice(i-1,i+2);
-          const scale = Math.cos(b[0]*Math.PI/180);
-          const dx = lng => ((lng+540)%360)-180;
-          if ((b[0]-a[0])*(c[0]-b[0])+dx(b[1]-a[1])*dx(c[1]-b[1])*scale*scale < -1e-10) turns++;
+        const detour=D7Planning.backtracking([D7Planning.coordinate(allLegs[0].start_location),...allLegs.map(leg=>D7Planning.coordinate(leg.end_location))]);
+        const key=D7Planning.routeKey(orderedIndices,requestedStops,origin,destination);
+        const existing=candidates.find(c=>c.key===key);
+        if(existing) {
+          if(phase!=="baseline")existing.generated=true;
+          return;
         }
-        const key = orderedIndices.join(",");
-        if (!candidates.some(c=>c.key===key)) candidates.push({name,key,completed,allLegs,orderedPoints,orderedIndices,distance,duration,turns:hasCoordinates?turns:null});
+        candidates.push({name,key,generated:phase!=="baseline",completed,allLegs,orderedPoints,orderedIndices,distance,duration,turns:detour.turns,reversalMeters:detour.meters});
       }
+      let distanceLimit=Infinity;
       function compare(a,b) {
-        if (objective === "time") return a.duration-b.duration || a.distance-b.distance;
-        if (objective === "backtracking" && candidates.every(c=>c.turns!==null)) return a.turns-b.turns || a.distance-b.distance || a.duration-b.duration;
-        return a.distance-b.distance || a.duration-b.duration;
+        const generatedTie=Number(b.generated)-Number(a.generated);
+        if (objective === "time") return a.duration-b.duration || a.distance-b.distance || generatedTie;
+        if (objective === "backtracking" && candidates.every(c=>c.reversalMeters!==null)) {
+          return Number(a.distance>distanceLimit)-Number(b.distance>distanceLimit) || a.reversalMeters-b.reversalMeters || a.distance-b.distance || a.duration-b.duration || generatedTie;
+        }
+        return a.distance-b.distance || a.duration-b.duration || generatedTie;
       }
       function finishComparison() {
         if (!current()) return;
+        manualSelection=false;
+        distanceLimit=Math.min(...candidates.map(c=>c.distance))*(1+extraPercent/100)+1e-6;
         candidates.sort(compare);
-        if (!candidates.length) { fail("Could not calculate a complete route that honors the selected requirements."); return; }
+        if (!candidates.length || (optimize && !candidates.some(c=>c.generated))) { fail("Could not calculate a complete route that honors the selected requirements."); return; }
         ({completed,allLegs,orderedPoints,orderedIndices}=candidates[0]);
         publish();
       }
-      function fail(message) {
+      function fail(message,status) {
         if (!current()) return;
-        // A failed optional comparison cannot erase a valid, compliant plan.
-        if (candidates.length && !publishing) { comparisonWarning=message+" Comparison incomplete."; finishComparison(); return; }
+        // The initial optimization must succeed. An entered-order measurement
+        // is never a substitute for a failed optimization of unordered inputs.
+        const hardFailure=["REQUEST_DENIED","OVER_QUERY_LIMIT","OVER_DAILY_LIMIT"].includes(status);
+        if (phase==="comparison" && candidates.some(c=>c.generated) && !publishing && !hardFailure) {
+          comparisonWarning=message+" Comparison incomplete."; comparisonReason="The additional comparison failed."; finishComparison(); return;
+        }
         routeRequestPending = false;
         routeMessage.textContent = message;
       }
       function publish() {
         publishing = true;
+        // Re-ranking a completed plan must remove old map layers and rebuild
+        // labels, First flags and instructions from the original visit IDs.
+        clearRouteResults();
         const totalDistance = allLegs.reduce((sum, leg) => sum + leg.distance.value, 0);
         const totalDuration = allLegs.reduce((sum, leg) => sum + leg.duration.value, 0);
         if (!Number.isFinite(totalDistance) || !Number.isFinite(totalDuration)) {
@@ -1610,25 +1594,45 @@
           renderStops();
         }
         document.getElementById("route-order-note").textContent = optimize
-          ? `Best evaluated for ${objective === "fuel" ? "estimated fuel" : objective === "time" ? "driving time" : "less backtracking"}. Requirements take precedence. This is a heuristic, not a guaranteed global optimum. Fuel uses fixed MPG; driving time does not predict arrival traffic. Backtracking counts geographic heading changes over 90° at stops, not repeated roads. ${comparisonWarning}` : "Kept your exact entered order.";
-        const elapsed=((Date.now()-planningStarted)/1000).toFixed(1);
+          ? `${manualSelection?"Selected by you. Planning objective":"Best evaluated for"}: ${objective === "fuel" ? "estimated fuel" : objective === "time" ? "driving time" : "less backtracking"}. Requirements take precedence. This is a heuristic, not a guaranteed global optimum. Fuel uses fixed MPG; driving time does not predict arrival traffic. Backtracking weights geographic reversals by distance, within ${extraPercent}% extra mileage of the shortest measured route; it does not detect repeated roads. ${comparisonWarning}` : "Kept your exact entered order.";
+        if(elapsed===null)elapsed=((Date.now()-planningStarted)/1000).toFixed(1);
         refreshRouteComparison=()=>{
           const comparison = document.getElementById("route-comparison");
           comparison.innerHTML = "";
+          routeAlternativeButtons=[];
           if (optimize) candidates.forEach((candidate,i)=>{
             const row=document.createElement("p");
             const miles=candidate.distance/1609.344;
             const fuel=estimatedFuelCost(Number(miles.toFixed(1)));
             const rawGallons=positiveNumber(vehicleMpgInput.value) ? miles/Number(vehicleMpgInput.value) : NaN;
             const gallons=Number.isFinite(rawGallons)?rawGallons:null;
-            row.textContent=`${i===0?"Recommended":"Alternative "+i} · ${candidate.name}: ${miles.toFixed(1)} mi · ${Math.round(candidate.duration/60)} min${gallons===null?"":` · ${gallons.toFixed(1)} gal est.`}${fuel===null?"":` · $${fuel.toFixed(2)} est.`} · ${candidate.turns===null?"backtracking unavailable":candidate.turns+" geographic reversals"}`;
+            row.textContent=`${i===0?(manualSelection?"Selected":"Recommended"):"Alternative "+i} · ${candidate.name}: ${miles.toFixed(1)} mi · ${Math.round(candidate.duration/60)} min${gallons===null?"":` · ${gallons.toFixed(1)} gal est.`}${fuel===null?"":` · $${fuel.toFixed(2)} est.`} · ${candidate.turns===null?"backtracking unavailable":candidate.turns+" geographic reversals, "+(candidate.reversalMeters/1609.344).toFixed(1)+" reversal mi"}${objective==="backtracking" && candidate.distance>distanceLimit?" · Outside extra-mileage limit":""}`;
+            if (optimize && i>0) {
+              const choose=document.createElement("button");choose.type="button";choose.textContent="Use this route";
+              choose.disabled=!!tripProgress;routeAlternativeButtons.push(choose);
+              choose.addEventListener("click",()=>{
+                if(tripProgress || routeRequestPending || !routeShown)return;
+                candidates.splice(candidates.indexOf(candidate),1);candidates.unshift(candidate);({completed,allLegs,orderedPoints,orderedIndices}=candidate);manualSelection=true;publish();
+              });
+              row.appendChild(choose);
+            }
             comparison.appendChild(row);
           });
           const timing=document.createElement("p");
-          timing.textContent=`Planning: ${elapsed} s · ${directionsRequests} Directions requests · ${candidates.length} distinct complete ${candidates.length===1?"route":"routes"} evaluated.${optimize && requestedStops.length>1 && candidates.length<2?" No second distinct compliant route was available.":""}${objective==="backtracking" && candidates.some(c=>c.turns===null)?" Coordinates unavailable; ranked by mileage instead.":""}`;
+          timing.textContent=`Planning: ${elapsed} s · ${directionsRequests} Directions requests · ${reusedSections} sections reused · ${candidates.length} distinct complete ${candidates.length===1?"route":"routes"} evaluated (${candidates.filter(c=>c.generated).length} generated). ${comparisonReason}${objective==="backtracking" && candidates.some(c=>c.turns===null)?" Coordinates unavailable; ranked by mileage instead.":""}`;
           comparison.appendChild(timing);
         };
         refreshRouteComparison();
+        rerankRouteCandidates=()=>{
+          const next=document.getElementById("planning-objective").value || "fuel";
+          const limit=Number(document.getElementById("backtracking-extra").value || "10");
+          if(!["fuel","time","backtracking"].includes(next) || !Number.isFinite(limit) || limit<0 || limit>50) {
+            routeMessage.textContent="Enter an extra-mileage limit from 0 to 50 percent.";return;
+          }
+          objective=next;extraPercent=limit;
+          comparisonReason="Re-ranked the already measured routes without new mapping requests. Plan Route searches for additional candidates for the selected objective.";
+          finishComparison();updatePrioritySummary();
+        };
         routeRequestPending = false;
         routeShown = true;
         routeStaleWarning.hidden = true;
@@ -1652,10 +1656,11 @@
           `${optimize ? "Route optimized" : "Route calculated"}: ${miles} miles • ${minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`}${fuelCost}`;
       }
       function pumpSections() {
-        if (!current() || !routeRequestPending) return;
+        if (!current() || !routeRequestPending || paused) return;
         // Two independent sections at a time; never an all-at-once burst.
         const limit=optimize ? 2 : 1;
-        for(let i=0;i<sections.length && inFlightSections.size<limit;i++)
+        const pass=passSerial;
+        for(let i=0;i<sections.length && inFlightSections.size<limit && pass===passSerial;i++)
           if(!sentSections.has(sections[i]))requestSection(i);
       }
       function requestSection(index) {
@@ -1667,18 +1672,8 @@
         routeMessage.textContent = `${optimize ? (phase === "comparison" ? "Comparing complete routes" : "Optimizing route") : "Calculating route"}...` +
           (sections.length > 1 ? ` ${phase === "baseline" ? "Locating stops · " : ""}Section ${index + 1} of ${sections.length}.` : "");
         let answered=false;
-        const routeTimeout = setTimeout(() => {
-          if (!current() || !routeRequestPending) return;
-          answered=true;
-          fail("Route request timed out. Please try again.");
-        }, ROUTE_REQUEST_TIMEOUT_MS);
-        try {
-          directionsRequests++;
-          directionsService.route({
-            origin: section[0], destination: section[section.length - 1],
-            waypoints: intermediate.map(address => ({ location: address, stopover: true })),
-            optimizeWaypoints: optimize && phase === "final", travelMode: google.maps.TravelMode.DRIVING
-          }, (result, status) => {
+        let routeTimeout;
+        const onResult = (result, status) => {
             if(answered)return;answered=true;
             clearTimeout(routeTimeout);
             if (!current() || !routeRequestPending) return;
@@ -1690,6 +1685,18 @@
               return;
             }
             if (status !== "OK") {
+              if(status==="OVER_QUERY_LIMIT" && quotaRetries<2 && !retryCounts.has(section)) {
+                retryCounts.set(section,1);quotaRetries++;paused=true;pauseUntil=Math.max(pauseUntil,Date.now()+1000*quotaRetries);
+                sentSections.delete(section);
+                routeMessage.textContent="Waiting briefly before retrying a mapping rate limit...";
+                const resume=()=>{
+                  if(!current() || !routeRequestPending)return;
+                  if(Date.now()<pauseUntil){setTimeout(resume,pauseUntil-Date.now());return;}
+                  paused=false;pumpSections();
+                };
+                setTimeout(resume,1000*quotaRetries);
+                return;
+              }
               if (status === "MAX_ROUTE_LENGTH_EXCEEDED" && section.length > 2) {
                 // A geographically long/complex section may need fewer stops
                 // than Google's waypoint ceiling. Split internally and retry.
@@ -1700,7 +1707,7 @@
                 pumpSections();
                 return;
               }
-              fail(`Could not calculate route: ${status}`);
+              fail(`Could not calculate route: ${status}`,status);
               return;
             }
             const route = result && result.routes && result.routes[0];
@@ -1726,6 +1733,8 @@
               ids = order.map(i => intermediateIndices[i]);
             }
             if(sectionOffset+section.length-1 < activeIndices.length+1)ids.push(activeIndices[sectionOffset+intermediate.length]);
+            const measuredPath=[section[0],...ordered,section.at(-1)];
+            sectionCache.set(JSON.stringify(measuredPath),result);
             sectionResults.set(section,{result,legs:route.legs,points:[...ordered,section[section.length-1]],ids});
             if(sectionResults.size!==sections.length) { pumpSections(); return; }
             // Assemble by section order, even if the network replies out of order.
@@ -1735,41 +1744,55 @@
             }
             if (phase === "baseline") {
               if(!Number.isFinite(allLegs.reduce((sum,leg)=>sum+leg.distance.value,0)) || !Number.isFinite(allLegs.reduce((sum,leg)=>sum+leg.duration.value,0))) { fail("Could not calculate route: invalid route totals. Please try again."); return; }
-              const order = geographicStopOrder(allLegs,requestedFirst,priority,cutoff);
-              if (!order) {
+              model = D7Planning.createModel(allLegs,orderedIndices,requestedStops.length,requestedFirst,priority,cutoff);
+              if (!model) {
                 fail("Could not optimize the full stop list: address coordinates were unavailable. Use Keep My Order to preserve your order.");
                 return;
               }
-              tiers=order.tiers;
-              capture("Entered order");
+              tiers=model.tiers;
+              capture("Entered order (reference)");
               phase = "final";
               completed = []; allLegs = []; orderedPoints = [origin]; orderedIndices = [];
-              buildSections(order.indices);
+              // Retain the established complete-route seed as the measured
+              // reference; the additional candidate uses the selected objective.
+              buildSections(model.primary().indices);
               pumpSections();
             } else {
               capture(phase === "comparison" ? "Alternate stop order" : optimize ? "Road-optimized order" : "Entered order");
-              if (!optimize || requestedStops.length<2 || candidates.length>=2 || phase==="comparison") { finishComparison(); return; }
-              // Reuse coordinates from the measured route; no geocoding service or
-              // per-pair distance matrix. Generate one whole-route alternative.
-              const locations=[];
-              orderedIndices.forEach((id,i)=>{locations[id]=allLegs[i].end_location;});
-              const canonicalLegs = requestedStops.map((_,i)=>({start_location:allLegs[0].start_location,end_location:locations[i]}));
-              canonicalLegs.push({end_location:allLegs[allLegs.length-1].end_location});
-              const geographic=geographicStopOrder(canonicalLegs,requestedFirst,priority,cutoff);
-              let alternative=geographic ? geographic.indices : [...orderedIndices];
-              if(geographic)tiers=geographic.tiers;
-              if(candidates.some(c=>c.key===alternative.join(","))) {
-                alternative=[];
-                for(const tier of [...new Set(tiers)].sort((a,b)=>a-b))
-                  alternative.push(...orderedIndices.filter(id=>tiers[id]===tier).reverse());
-              }
-              if(candidates.some(c=>c.key===alternative.join(","))) { finishComparison(); return; }
+              if (!optimize || requestedStops.length<2 || phase==="comparison") { finishComparison(); return; }
+              if(!model)model=D7Planning.createModel(allLegs,orderedIndices,requestedStops.length,requestedFirst,priority,cutoff);
+              if(!model){comparisonReason="Coordinates unavailable for local candidate screening; no extra request sent.";finishComparison();return;}
+              model.learn(allLegs,orderedIndices);
+              const pool=model.generate(objective);
+              const key=ids=>D7Planning.routeKey(ids,requestedStops,origin,destination,new Set(tiers).size===1);
+              const measured=new Set(candidates.map(c=>key(c.orderedIndices)));
+              const currentScore=model.metrics(orderedIndices,objective).score;
+              // Do not measure a forced reversal, identical duplicate-visit route,
+              // or a visibly poor alternative just to inflate candidate counts.
+              // Small jobs need a predicted improvement to justify extra latency.
+              const threshold=requestedStops.length<=25?0.995:1.15;
+              const alternative=pool.find(c=>!measured.has(key(c.indices)) && c.score<currentScore*threshold);
+              if(!alternative){comparisonReason="Local screening found no distinct candidate worth an additional mapping request.";finishComparison();return;}
               phase="comparison";
               completed=[];allLegs=[];orderedPoints=[origin];orderedIndices=[];
-              buildSections(alternative);
+              buildSections(alternative.indices);
               pumpSections();
             }
-          });
+          };
+        const cached=phase==="comparison" ? sectionCache.get(JSON.stringify(section)) : null;
+        if(cached){reusedSections++;onResult(cached,"OK");return;}
+        routeTimeout = setTimeout(() => {
+          if (!current() || !routeRequestPending) return;
+          answered=true;
+          fail("Route request timed out. Please try again.");
+        }, ROUTE_REQUEST_TIMEOUT_MS);
+        try {
+          directionsRequests++;
+          directionsService.route({
+            origin: section[0], destination: section.at(-1),
+            waypoints: intermediate.map(location=>({location,stopover:true})),
+            optimizeWaypoints: optimize && phase === "final", travelMode: google.maps.TravelMode.DRIVING
+          },onResult);
         } catch {
           answered=true;clearTimeout(routeTimeout);
           fail("Could not calculate route: the request could not be sent. Please try again.");
@@ -1807,7 +1830,7 @@
         }
       }
       let kind = "";
-      if (/^(Calculating route|Optimizing route|Wait for the map)/.test(text)) kind = "is-busy";
+      if (/^(Calculating route|Optimizing route|Comparing complete routes|Waiting briefly|Wait for the map)/.test(text)) kind = "is-busy";
       else if (matched || /^(Route saved|Route loaded|Route deleted):/.test(text)) kind = "is-ok";
       else if (text) kind = "is-error";
       message.className = "route-message" + (kind ? " " + kind : "");
