@@ -4,10 +4,25 @@ const P=require('../route-planning.js');
 const p=x=>({lat:0,lng:x});
 const legs=points=>points.slice(1).map((end_location,i)=>({start_location:points[i],end_location,distance:{value:P.distance(points[i],end_location)},duration:{value:100}}));
 
-test('duplicate colocated visits cannot hide the distance-weighted depot reversal',()=>{
-  const a=P.backtracking([p(0),p(1),p(1),p(0)]),b=P.backtracking([p(0),p(.1),p(.1),p(0)]);
-  assert.equal(a.turns,1);assert.equal(b.turns,1);assert.ok(a.meters>b.meters*9.9);
-  assert.deepEqual(P.backtracking([p(0),null,p(1)]),{turns:null,meters:null});
+test('area returns distinguish A-B-A from A-A-B and exclude endpoints',()=>{
+  const points=[p(-1),p(0),p(2),p(.1),p(0)];
+  const scorer=P.createAreaScorer(points);
+  assert.equal(scorer.score([0,1,2]).returns,1);
+  assert.ok(scorer.score([0,1,2]).meters>400000);
+  assert.deepEqual(scorer.score([0,2,1]),{returns:0,meters:0});
+  assert.equal(P.backtracking([p(0),p(1),p(1),p(0)]).returns,0);
+  assert.deepEqual(P.backtracking([p(0),null,p(1)]),{returns:null,meters:null});
+  assert.equal(scorer.score([0,1,2],1).returns,0);
+  assert.equal(P.backtracking([p(-1),p(0),p(2),p(.1),p(.1),p(0)]).returns,1);
+});
+
+test('fixed area centers avoid transitive chains and are independent of visit order',()=>{
+  const scorer=P.createAreaScorer([p(-1),p(0),p(.3),p(.6),p(2)]);
+  assert.equal(scorer.labels()[1],scorer.labels()[2]);
+  assert.notEqual(scorer.labels()[1],scorer.labels()[3]);
+  const other=P.createAreaScorer([p(-1),p(.6),p(.3),p(0),p(2)]);
+  assert.equal(other.labels()[2],other.labels()[3]);
+  assert.notEqual(other.labels()[1],other.labels()[3]);
 });
 
 test('route screening collapses adjacent duplicate visits and equivalent reversed depot loops',()=>{

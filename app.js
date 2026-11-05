@@ -967,6 +967,10 @@
           if (!["fuel", "time", "backtracking"].includes(route.planningObjective)) throw new Error("Unknown planning objective.");
           preferences.planningObjective = route.planningObjective;
         }
+        if (route.backtrackingAreaMiles != null) {
+          if (!Number.isFinite(route.backtrackingAreaMiles) || route.backtrackingAreaMiles<1 || route.backtrackingAreaMiles>100) throw new Error("Invalid nearby-area radius.");
+          preferences.backtrackingAreaMiles = route.backtrackingAreaMiles;
+        }
         if (route.backtrackingExtraPercent != null) {
           if (!Number.isFinite(route.backtrackingExtraPercent) || route.backtrackingExtraPercent<0 || route.backtrackingExtraPercent>50) throw new Error("Invalid extra-mileage limit.");
           preferences.backtrackingExtraPercent = route.backtrackingExtraPercent;
@@ -1118,6 +1122,7 @@
       try { D7Import.instructions(document.getElementById("route-instructions").value || "", stops.length); }
       catch(error) { routeMessage.textContent=error.message; return; }
       const extra=readBacktrackingLimit();
+      if(document.getElementById("planning-objective").value==="backtracking" && readBacktrackingArea()===null){routeMessage.textContent="Enter a nearby-area radius from 1 to 100 miles.";return;}
       if(document.getElementById("planning-objective").value==="backtracking" && extra===null){routeMessage.textContent="Enter an extra-mileage limit from 0 to 50 percent.";return;}
       const savedRoutes = getSavedRoutes();
       if (Object.prototype.hasOwnProperty.call(savedRoutes, name) &&
@@ -1129,6 +1134,7 @@
       savedRoutes[name] = {
         planningObjective: document.getElementById("planning-objective").value || "fuel",
         backtrackingExtraPercent: extra ?? 10,
+        backtrackingAreaMiles: readBacktrackingArea() ?? 25,
         start,
         stops: [...stops],
         ...(stopLabels.some(Boolean) ? { stopLabels: [...stopLabels] } : {}),
@@ -1197,6 +1203,7 @@
       fuelPriceInput.value = savedRoute.fuelPrice || "4.50";
       document.getElementById("planning-objective").value = savedRoute.planningObjective || "fuel";
       document.getElementById("backtracking-extra").value = String(savedRoute.backtrackingExtraPercent ?? 10);
+      document.getElementById("backtracking-area").value = String(savedRoute.backtrackingAreaMiles ?? 25);
       routeNameInput.value = name;
       renderStops();
       showView("plan", true);
@@ -1381,8 +1388,19 @@
     }
     document.getElementById("planning-objective").addEventListener("change", changePlanningObjective);
     document.getElementById("backtracking-extra").addEventListener("change", changePlanningObjective);
+    document.getElementById("backtracking-area").addEventListener("change", changePlanningObjective);
     document.getElementById("calculate-route").addEventListener("click", () => planRoute(false));
 
+    function readBacktrackingArea() {
+      const text=String(document.getElementById("backtracking-area").value).trim(),value=Number(text);
+      return text && Number.isFinite(value) && value>=1 && value<=100 ? value : null;
+    }
+    function calculateAreaScorer(legs,order,count) {
+      const points=Array(count+2);points[0]=D7Planning.coordinate(legs[0].start_location);
+      order.forEach((id,i)=>{points[id+1]=D7Planning.coordinate(legs[i].end_location);});
+      points[count+1]=D7Planning.coordinate(legs[legs.length-1].end_location);
+      return D7Planning.createAreaScorer(points);
+    }
     function readBacktrackingLimit() {
       const text=String(document.getElementById("backtracking-extra").value).trim();
       const value=Number(text);
@@ -1395,6 +1413,10 @@
       let publishing = false;
       let manualSelection = false, elapsed = null;
       let comparisonWarning = "";
+      let areaScorer,areaInitialized=false;
+      let areaMiles=readBacktrackingArea();
+      if(optimize && document.getElementById("planning-objective").value==="backtracking" && areaMiles===null){routeMessage.textContent="Enter a nearby-area radius from 1 to 100 miles.";return;}
+      areaMiles=areaMiles ?? 25;
       let limitWarning = "";
       let objective = document.getElementById("planning-objective").value || "fuel";
       let extraPercent = readBacktrackingLimit();
@@ -1511,21 +1533,22 @@
         const distance = allLegs.reduce((sum,leg)=>sum+leg.distance.value,0);
         const duration = allLegs.reduce((sum,leg)=>sum+leg.duration.value,0);
         if (!Number.isFinite(distance) || !Number.isFinite(duration)) return;
-        const detour=D7Planning.backtracking([D7Planning.coordinate(allLegs[0].start_location),...allLegs.map(leg=>D7Planning.coordinate(leg.end_location))]);
+        if(!areaInitialized){areaScorer=calculateAreaScorer(allLegs,orderedIndices,requestedStops.length);areaInitialized=true;}
+        const detour=areaScorer?areaScorer.score(orderedIndices,areaMiles):{returns:null,meters:null};
         const key=D7Planning.routeKey(orderedIndices,requestedStops,origin,destination);
         const existing=candidates.find(c=>c.key===key);
         if(existing) {
           if(phase!=="baseline")existing.generated=true;
           return;
         }
-        candidates.push({name,key,generated:optimize && phase!=="baseline",completed,allLegs,orderedPoints,orderedIndices,distance,duration,turns:detour.turns,reversalMeters:detour.meters});
+        candidates.push({name,key,generated:optimize && phase!=="baseline",completed,allLegs,orderedPoints,orderedIndices,distance,duration,areaReturns:detour.returns,returnMeters:detour.meters});
       }
       let distanceLimit=Infinity;
       function compare(a,b) {
         const generatedTie=Number(b.generated)-Number(a.generated);
         if (objective === "time") return a.duration-b.duration || a.distance-b.distance || generatedTie;
-        if (objective === "backtracking" && candidates.every(c=>c.reversalMeters!==null)) {
-          return Number(a.distance>distanceLimit)-Number(b.distance>distanceLimit) || a.reversalMeters-b.reversalMeters || a.distance-b.distance || a.duration-b.duration || generatedTie;
+        if (objective === "backtracking" && candidates.every(c=>c.returnMeters!==null)) {
+          return Number(a.distance>distanceLimit)-Number(b.distance>distanceLimit) || a.returnMeters-b.returnMeters || a.areaReturns-b.areaReturns || a.distance-b.distance || a.duration-b.duration || generatedTie;
         }
         return a.distance-b.distance || a.duration-b.duration || generatedTie;
       }
@@ -1612,7 +1635,7 @@
             renderStops();
           }
           document.getElementById("route-order-note").textContent = optimize
-            ? `${manualSelection?"Selected by you. Planning objective":"Best evaluated for"}: ${objective === "fuel" ? "estimated fuel" : objective === "time" ? "driving time" : "less backtracking"}. Requirements take precedence. This is a heuristic, not a guaranteed global optimum. Fuel uses fixed MPG; driving time does not predict arrival traffic. Backtracking weights geographic reversals by distance, within ${extraPercent}% extra mileage of the shortest measured route; it does not detect repeated roads. ${comparisonWarning} ${limitWarning}` : "Kept your exact entered order.";
+            ? `${manualSelection?"Selected by you. Planning objective":"Best evaluated for"}: ${objective === "fuel" ? "estimated fuel" : objective === "time" ? "driving time" : "less backtracking"}. Requirements take precedence. This is a heuristic, not a guaranteed global optimum. Fuel uses fixed MPG; driving time does not predict arrival traffic. Backtracking reduces returns to visited stop areas (${areaMiles} mi radius), within ${extraPercent}% extra mileage of the shortest measured route. The geographic return score measures excursions between area visits; overlapping excursions can overlap in the score. Start and finish are excluded. It does not detect repeated roads or actual extra road miles. ${comparisonWarning} ${limitWarning}` : "Kept your exact entered order.";
           if(elapsed===null)elapsed=((Date.now()-planningStarted)/1000).toFixed(1);
           refreshRouteComparison=()=>{
             const comparison = document.getElementById("route-comparison");
@@ -1624,7 +1647,7 @@
               const fuel=estimatedFuelCost(Number(miles.toFixed(1)));
               const rawGallons=positiveNumber(vehicleMpgInput.value) ? miles/Number(vehicleMpgInput.value) : NaN;
               const gallons=Number.isFinite(rawGallons)?rawGallons:null;
-              row.textContent=`${i===0?(manualSelection?"Selected":"Recommended"):"Alternative "+i} · ${candidate.name}: ${miles.toFixed(1)} mi · ${Math.round(candidate.duration/60)} min${gallons===null?"":` · ${gallons.toFixed(1)} gal est.`}${fuel===null?"":` · $${fuel.toFixed(2)} est.`} · ${candidate.turns===null?"backtracking unavailable":candidate.turns+" geographic reversals, "+(candidate.reversalMeters/1609.344).toFixed(1)+" reversal mi"}${objective==="backtracking" && candidate.distance>distanceLimit?" · Outside extra-mileage limit":""}`;
+              row.textContent=`${i===0?(manualSelection?"Selected":"Recommended"):"Alternative "+i} · ${candidate.name}: ${miles.toFixed(1)} mi · ${Math.round(candidate.duration/60)} min${gallons===null?"":` · ${gallons.toFixed(1)} gal est.`}${fuel===null?"":` · $${fuel.toFixed(2)} est.`} · ${candidate.areaReturns===null?"backtracking unavailable":candidate.areaReturns+" area returns, "+(candidate.returnMeters/1609.344).toFixed(1)+" mi geographic return score"}${objective==="backtracking" && candidate.distance>distanceLimit?" · Outside extra-mileage limit":""}`;
               if (optimize && i>0) {
                 const choose=document.createElement("button");choose.type="button";choose.className="btn route-choice";choose.textContent="Use this route";
                 choose.disabled=!!tripProgress;routeAlternativeButtons.push(choose);
@@ -1637,7 +1660,7 @@
               comparison.appendChild(row);
             });
             const timing=document.createElement("p");
-            timing.textContent=`Planning: ${elapsed} s · ${directionsRequests} Directions requests · ${reusedSections} sections reused · ${candidates.length} distinct complete ${candidates.length===1?"route":"routes"} evaluated (${candidates.filter(c=>c.generated).length} generated). ${comparisonReason}${objective==="backtracking" && candidates.some(c=>c.turns===null)?" Coordinates unavailable; ranked by mileage instead.":""}`;
+            timing.textContent=`Planning: ${elapsed} s · ${directionsRequests} Directions requests · ${reusedSections} sections reused · ${candidates.length} distinct complete ${candidates.length===1?"route":"routes"} evaluated (${candidates.filter(c=>c.generated).length} generated). ${comparisonReason}${objective==="backtracking" && candidates.some(c=>c.areaReturns===null)?" Coordinates unavailable; ranked by mileage instead.":""}`;
             comparison.appendChild(timing);
           };
           refreshRouteComparison();
@@ -1646,9 +1669,16 @@
             if(!["fuel","time","backtracking"].includes(next))return;
             objective=next;
             if(!optimize)return; // Objectives do not alter a Keep My Order result.
+            const radius=readBacktrackingArea();
+            if(radius!==null)areaMiles=radius;
+            for(const candidate of candidates) {
+              const score=areaScorer?areaScorer.score(candidate.orderedIndices,areaMiles):{returns:null,meters:null};
+              candidate.areaReturns=score.returns;candidate.returnMeters=score.meters;
+            }
             const limit=readBacktrackingLimit();
             if(limit!==null)extraPercent=limit;
             limitWarning=objective==="backtracking" && limit===null ? `Invalid mileage limit. The displayed comparison uses the last valid ${extraPercent}%; correct the visible limit before planning or saving.` : "";
+            if(objective==="backtracking" && radius===null)limitWarning+=` Invalid nearby-area radius. The displayed comparison uses the last valid ${areaMiles} miles; correct it before planning or saving.`;
             comparisonReason="Re-ranked the already measured routes without new mapping requests. Plan Route searches for additional candidates for the selected objective.";
             finishComparison();updatePrioritySummary();
           };
@@ -1775,11 +1805,12 @@
             }
             if (phase === "baseline") {
               if(!Number.isFinite(allLegs.reduce((sum,leg)=>sum+leg.distance.value,0)) || !Number.isFinite(allLegs.reduce((sum,leg)=>sum+leg.duration.value,0))) { fail("Could not calculate route: invalid route totals. Please try again."); return; }
-              model = D7Planning.createModel(allLegs,orderedIndices,requestedStops.length,requestedFirst,priority,cutoff);
+              model = D7Planning.createModel(allLegs,orderedIndices,requestedStops.length,requestedFirst,priority,cutoff,areaMiles);
               if (!model) {
                 fail("Could not optimize the full stop list: address coordinates were unavailable. Use Keep My Order to preserve your order.");
                 return;
               }
+              areaScorer=model.areaScorer;areaInitialized=true;
               tiers=model.tiers;
               capture("Entered order (reference)");
               phase = "final";
@@ -1794,7 +1825,7 @@
               // Screening the additional candidate is optional once the
               // primary optimization has completed successfully.
               phase="comparison";
-              if(!model)model=D7Planning.createModel(allLegs,orderedIndices,requestedStops.length,requestedFirst,priority,cutoff);
+              if(!model)model=D7Planning.createModel(allLegs,orderedIndices,requestedStops.length,requestedFirst,priority,cutoff,areaMiles);
               if(!model){comparisonReason="Coordinates unavailable for local candidate screening; no extra request sent.";finishComparison();return;}
               model.learn(allLegs,orderedIndices);
               const pool=model.generate(objective);

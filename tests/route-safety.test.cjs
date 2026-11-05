@@ -39,6 +39,7 @@ function setup(confirmations = [], {
   el('vehicle-mpg').value = '15';
   el('fuel-price').value = '4.50';
   el('backtracking-extra').value = '10';
+  el('backtracking-area').value = '25';
   const requests = [];
   const mapsInstances = [];
   const renderers = [];
@@ -231,11 +232,11 @@ for(const objective of ['fuel','time','backtracking'])test(`${objective} ranks d
   assert.equal(a.requests.length,2);
   assert.equal(a.requests[1].options.optimizeWaypoints,false,'Measure the exact alternate order');
   replyRoad(a,1,{miles:12,minutes:10});
-  const expected=objective==='fuel'?['Stop 2','Stop 1']:['Stop 1','Stop 2'];
+  const expected=objective!=='time'?['Stop 2','Stop 1']:['Stop 1','Stop 2'];
   assert.deepEqual([...a.el('stops-container').children].map(row=>row.children[1].value),expected);
   const rows=a.el('route-comparison').children.map(row=>row.textContent);
   assert.match(rows[0],/^Recommended/);assert.match(rows[1],/^Alternative 1/);
-  assert.match(rows[0],objective==='fuel'?/10.0 mi · 20 min.*2 geographic reversals/:/12.0 mi · 10 min.*0 geographic reversals/);
+  assert.match(rows[0],objective!=='time'?/10.0 mi · 20 min.*0 area returns/:/12.0 mi · 10 min.*0 area returns/);
   assert.match(rows[2],/2 Directions requests.*2 distinct complete routes/);
   a.click('start-trip');const snapshot=JSON.parse(a.stored.d7TripProgress).routeSnapshot;
   assert.deepEqual(snapshot.stops,expected);assert.equal(snapshot.start,'Origin');assert.equal(snapshot.destination,'End');
@@ -389,29 +390,40 @@ test('changing objective reranks measured routes with no requests and retains la
     a.el('planning-objective').value=objective;a.el('planning-objective').listeners.change();
     assert.equal(a.requests.length,messages);assert.equal(a.el('navigation-results').hidden,false);
     const addresses=a.el('stops-container').children.map(row=>row.children[1].value);
-    assert.deepEqual(addresses,objective==='fuel'?['Stop 2','Stop 1']:['Stop 1','Stop 2']);
+    assert.deepEqual(addresses,objective!=='time'?['Stop 2','Stop 1']:['Stop 1','Stop 2']);
     a.el('route-name').value='Cache';a.click('save-route');
     const save=a.savedRoutes().Cache;assert.deepEqual(save.stopLabels,save.stops.map(s=>'Store '+s.split(' ')[1]));
     assert.match(a.el('route-comparison').children.at(-1).textContent,/without new mapping requests/);
   }
 });
 
-test('backtracking mileage guard prevents an excessive detour and can be adjusted without requests',()=>{
-  const a=setup();bulkStops(a,2);a.el('planning-objective').value='backtracking';a.calculate();
-  replyRoad(a,0,{order:[1,0],miles:100});replyRoad(a,1,{miles:1000});
-  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 2','Stop 1']);
+function replyArea(a,index,{order,miles=100}={}) {
+  const request=a.requests[index].options;
+  const waypoints=request.waypoints.map(w=>w.location);
+  const addresses=[request.origin,...(order?order.map(i=>waypoints[i]):waypoints),request.destination];
+  const locations={Origin:{lat:0,lng:-1},'Stop 1':{lat:0,lng:0},'Stop 2':{lat:0,lng:2},'Stop 3':{lat:0,lng:.1},End:{lat:0,lng:3}};
+  a.reply(index,'OK',order,addresses.slice(1).map((to,i)=>({start_location:locations[addresses[i]],end_location:locations[to],distance:{value:miles*1609.344/(addresses.length-1)},duration:{value:600}})));
+}
+
+test('area-return mileage guard and radius rerank cached routes without requests',()=>{
+  const a=setup();bulkStops(a,3);a.el('planning-objective').value='backtracking';a.calculate();
+  replyArea(a,0,{order:[0,1,2],miles:100});assert.equal(a.requests.length,2);
+  replyArea(a,1,{miles:115});
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 2','Stop 3']);
+  assert.match(a.el('route-comparison').children[0].textContent,/1 area returns/);
   assert.match(a.el('route-comparison').children[1].textContent,/Outside extra-mileage limit/);
-  const b=setup();bulkStops(b,2);b.el('planning-objective').value='backtracking';b.calculate();
-  replyRoad(b,0,{order:[1,0],miles:100});replyRoad(b,1,{miles:115});
-  b.el('backtracking-extra').value='20';b.el('backtracking-extra').listeners.change();
-  assert.deepEqual(b.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 2']);
-  assert.equal(b.requests.length,2);
+  a.el('backtracking-extra').value='20';a.el('backtracking-extra').listeners.change();
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 3','Stop 2']);
+  assert.match(a.el('route-comparison').children[0].textContent,/0 area returns/);
+  a.el('backtracking-area').value='1';a.el('backtracking-area').listeners.change();
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 2','Stop 3']);
+  assert.equal(a.requests.length,2);
 });
 
-test('duplicate-address routes do not trigger a meaningless comparison; reversals remain visible',()=>{
+test('duplicate-address depot routes preserve visits without counting the final return',()=>{
   const a=setup();bulkStops(a,2);vm.runInContext("stops.splice(0,2,'Stop 2','Stop 2');renderStops()",a.context);a.destination('Origin');a.calculate();
   replyWithCoordinates(a,0);assert.equal(a.requests.length,1);
-  assert.match(a.el('route-comparison').children[0].textContent,/1 geographic reversals/);
+  assert.match(a.el('route-comparison').children[0].textContent,/0 area returns/);
   a.click('start-trip');assert.equal(JSON.parse(a.stored.d7TripProgress).routeSnapshot.stops.length,2);
 });
 
@@ -476,7 +488,7 @@ for(const invalid of ['99',''])test(`an invalid '${invalid}' backtracking limit 
   for(const objective of ['fuel','time']) {
     a.el('planning-objective').value=objective;a.el('planning-objective').listeners.change();
     assert.equal(a.requests.length,requests);assert.equal(a.el('backtracking-settings').hidden,true);
-    assert.match(a.el('route-order-note').textContent,objective==='fuel'?/estimated fuel/:/driving time/);
+    assert.match(a.el('route-order-note').textContent,objective!=='time'?/estimated fuel/:/driving time/);
     assert.doesNotMatch(a.el('route-order-note').textContent,/Invalid mileage limit/);
     a.el('route-name').value=objective;a.click('save-route');assert.equal(a.savedRoutes()[objective].backtrackingExtraPercent,10);
   }
@@ -2110,4 +2122,20 @@ test('repeat import of the same selection retains manual revisions instead of re
   a.click('apply-spreadsheet');assert.equal(a.el('stops-container').children.length,2);
   assert.equal(a.el('stops-container').children[0].children[1].value,'30 Main St');
   assert.match(a.el('spreadsheet-message').textContent,/already loaded/);
+});
+
+test('nearby-area radius saves and validates backups atomically',async()=>{
+  const a=setup();a.el('planning-objective').value='backtracking';a.el('route-name').value='Areas';
+  a.el('backtracking-area').value='12';a.click('save-route');assert.equal(a.savedRoutes().Areas.backtrackingAreaMiles,12);
+  a.el('backtracking-area').value='0';a.click('save-route');assert.equal(a.savedRoutes().Areas.backtrackingAreaMiles,12);
+  a.el('saved-route-select').value='Areas';a.click('load-route');assert.equal(a.el('backtracking-area').value,'12');
+  a.click('export-routes');const backup=JSON.parse(await a.blobs.at(-1).text());
+  backup.routes.Areas.backtrackingAreaMiles=101;const json=JSON.stringify(backup),before=a.stored.d7SavedRoutes;
+  a.el('import-routes-file').files=[{size:json.length,text:async()=>json}];await a.el('import-routes-file').listeners.change();
+  assert.equal(a.stored.d7SavedRoutes,before);
+});
+
+for(const value of ['','0','101'])test(`invalid area radius ${value} blocks planning only when active`,()=>{
+  const a=setup();a.el('planning-objective').value='backtracking';a.el('backtracking-area').value=value;a.calculate();assert.equal(a.requests.length,0);
+  a.el('planning-objective').value='fuel';a.calculate();assert.ok(a.requests.length>0);
 });
