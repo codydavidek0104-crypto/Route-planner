@@ -524,6 +524,35 @@ test('route selection buttons use the established button style and shipped scrip
   for(const name of ['app.js','route-planning.js'])assert.doesNotMatch(readFileSync(path.join(__dirname,'..',name),'utf8'),/\.at\(/);
 });
 
+test('a missing routing module shows an error without sending requests or latching busy state',()=>{
+  const a=setup();vm.runInContext('delete globalThis.D7Planning',a.context);
+  for(const action of ['plan-route','calculate-route']) {
+    a.click(action);assert.equal(a.requests.length,0);assert.equal(vm.runInContext('routeRequestPending',a.context),false);
+    assert.match(a.el('route-message').textContent,/local routing code did not load/);
+  }
+  vm.runInContext(readFileSync(path.join(__dirname,'../route-planning.js'),'utf8'),a.context);
+  a.calculate();a.reply(0);assert.equal(a.el('navigation-results').hidden,false);
+});
+
+test('a required response-processing exception abandons the plan and allows retry',()=>{
+  const a=setup();bulkStops(a,100);
+  vm.runInContext('globalThis.savedModel=D7Planning.createModel;D7Planning.createModel=()=>{throw new Error("model fault")}',a.context);
+  a.calculate();for(let i=0;i<4;i++)assert.doesNotThrow(()=>replyWithCoordinates(a,i));
+  assert.equal(vm.runInContext('routeRequestPending',a.context),false);assert.equal(a.el('navigation-results').hidden,true);
+  vm.runInContext('D7Planning.createModel=savedModel',a.context);a.calculate();assert.equal(a.requests.length,6);
+  let i=4;while(i<a.requests.length){replyWithCoordinates(a,i++);assert.ok(i<20);}
+  assert.equal(a.el('navigation-results').hidden,false);
+});
+
+test('an optional screening exception retains a completed optimized route with an explicit warning',()=>{
+  const a=setup();bulkStops(a,2);
+  vm.runInContext('D7Planning.createModel=()=>{throw new Error("screen fault")}',a.context);
+  a.calculate();assert.doesNotThrow(()=>replyRoad(a,0,{order:[1,0]}));
+  assert.equal(vm.runInContext('routeRequestPending',a.context),false);assert.equal(a.el('navigation-results').hidden,false);
+  assert.match(a.el('route-order-note').textContent,/routing response could not be processed.*Comparison incomplete/);
+  assert.equal(a.requests.length,1);
+});
+
 function finishTwoStopTrip(a) {
   beginTrip(a);
   a.click('trip-next'); a.click('trip-next'); a.click('finish-trip');

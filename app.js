@@ -1444,6 +1444,10 @@
         routeMessage.textContent = "Wait for the map to load, then try again.";
         return;
       }
+      if(typeof D7Planning==="undefined") {
+        routeMessage.textContent="Could not calculate route: local routing code did not load. Reload the page and try again.";
+        return;
+      }
 
       const requestedStops = stops.map(address => String(address));
       const requestedLabels = requestedStops.map((_, i) => stopLabels[i] || "");
@@ -1700,6 +1704,7 @@
         let answered=false;
         let routeTimeout;
         const onResult = (result, status) => {
+          try {
             if(answered)return;answered=true;
             clearTimeout(routeTimeout);
             if (!current() || !routeRequestPending) return;
@@ -1786,6 +1791,9 @@
             } else {
               capture(phase === "comparison" ? "Alternate stop order" : optimize ? "Road-optimized order" : "Entered order");
               if (!optimize || requestedStops.length<2 || phase==="comparison") { finishComparison(); return; }
+              // Screening the additional candidate is optional once the
+              // primary optimization has completed successfully.
+              phase="comparison";
               if(!model)model=D7Planning.createModel(allLegs,orderedIndices,requestedStops.length,requestedFirst,priority,cutoff);
               if(!model){comparisonReason="Coordinates unavailable for local candidate screening; no extra request sent.";finishComparison();return;}
               model.learn(allLegs,orderedIndices);
@@ -1804,6 +1812,10 @@
               buildSections(alternative.indices);
               pumpSections();
             }
+          } catch {
+            if(!current() || !routeRequestPending)return;
+            fail("Could not calculate route: the routing response could not be processed. Please try again.");
+          }
           };
         const cached=phase==="comparison" ? sectionCache.get(JSON.stringify(section)) : null;
         if(cached){reusedSections++;onResult(cached,"OK");return;}
