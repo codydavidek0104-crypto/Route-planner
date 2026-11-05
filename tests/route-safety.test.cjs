@@ -38,6 +38,7 @@ function setup(confirmations = [], {
   };
   el('vehicle-mpg').value = '15';
   el('fuel-price').value = '4.50';
+  el('backtracking-extra').value = '10';
   const requests = [];
   const mapsInstances = [];
   const renderers = [];
@@ -355,11 +356,16 @@ for(const failure of ['REQUEST_DENIED','OVER_QUERY_LIMIT','timeout'])test(`a mai
   replyWithCoordinates(a,5);assert.equal(a.el('navigation-results').hidden,true);
 });
 
-for(const status of ['REQUEST_DENIED','OVER_QUERY_LIMIT'])test(`optional comparison ${status} is a fatal authorization/quota error`,()=>{
+for(const status of ['REQUEST_DENIED','OVER_QUERY_LIMIT'])test(`optional comparison ${status} preserves only the appropriate authorization/rate-limit behavior`,()=>{
   const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});a.reply(1,status);
   if(status==='OVER_QUERY_LIMIT'){a.advance(1000);a.reply(2,status);}
-  assert.equal(a.el('navigation-results').hidden,true);assert.match(a.el('route-message').textContent,new RegExp(status));
-  assert.equal(vm.runInContext('routePlan',a.context),null);
+  if(status==='REQUEST_DENIED') {
+    assert.equal(a.el('navigation-results').hidden,true);assert.match(a.el('route-message').textContent,new RegExp(status));
+    assert.equal(vm.runInContext('routePlan',a.context),null);
+  } else {
+    assert.equal(a.el('navigation-results').hidden,false);assert.match(a.el('route-order-note').textContent,/OVER_QUERY_LIMIT.*Comparison incomplete/);
+    assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 2','Stop 1']);
+  }
 });
 
 test('temporary throttling waits before one bounded retry and ignores duplicate/late callbacks',()=>{
@@ -449,7 +455,7 @@ test('a localized alternative reuses unchanged complete section responses',()=>{
 });
 
 test('extra-mileage limits round trip and invalid limits cannot replace saved data',async()=>{
-  const a=setup();a.el('route-name').value='Limit';a.el('backtracking-extra').value='0';a.click('save-route');
+  const a=setup();a.el('planning-objective').value='backtracking';a.el('route-name').value='Limit';a.el('backtracking-extra').value='0';a.click('save-route');
   assert.equal(a.savedRoutes().Limit.backtrackingExtraPercent,0);
   a.el('backtracking-extra').value='99';a.click('save-route');assert.equal(a.savedRoutes().Limit.backtrackingExtraPercent,0);
   a.el('saved-route-select').value='Limit';a.click('load-route');assert.equal(a.el('backtracking-extra').value,'0');
@@ -457,6 +463,65 @@ test('extra-mileage limits round trip and invalid limits cannot replace saved da
   backup.routes.Limit.backtrackingExtraPercent=99;const json=JSON.stringify(backup),before=a.stored.d7SavedRoutes;
   a.el('import-routes-file').files=[{size:json.length,text:async()=>json}];await a.el('import-routes-file').listeners.change();
   assert.equal(a.stored.d7SavedRoutes,before);
+});
+
+for(const invalid of ['99',''])test(`an invalid '${invalid}' backtracking limit cannot block a hidden fuel/time objective`,()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0],miles:10});replyRoad(a,1,{miles:10.5});
+  const requests=a.requests.length;
+  a.el('planning-objective').value='backtracking';a.el('planning-objective').listeners.change();
+  a.el('backtracking-extra').value=invalid;a.el('backtracking-extra').listeners.change();
+  assert.match(a.el('route-order-note').textContent,/Invalid mileage limit.*last valid 10%/);
+  assert.match(a.el('route-order-note').textContent,/less backtracking/);
+  a.calculate();assert.equal(a.requests.length,requests);assert.equal(a.el('navigation-results').hidden,false,'Invalid planning inputs do not clear a good displayed plan');
+  for(const objective of ['fuel','time']) {
+    a.el('planning-objective').value=objective;a.el('planning-objective').listeners.change();
+    assert.equal(a.requests.length,requests);assert.equal(a.el('backtracking-settings').hidden,true);
+    assert.match(a.el('route-order-note').textContent,objective==='fuel'?/estimated fuel/:/driving time/);
+    assert.doesNotMatch(a.el('route-order-note').textContent,/Invalid mileage limit/);
+    a.el('route-name').value=objective;a.click('save-route');assert.equal(a.savedRoutes()[objective].backtrackingExtraPercent,10);
+  }
+  a.calculate();assert.equal(a.requests.length,requests+1,'Hidden invalid setting does not block planning');
+});
+
+test('a marker rendering exception clears pending work and a repeated Plan click can recover',()=>{
+  const a=setup();vm.runInContext('globalThis.renderRouteMarkers=()=>{throw new Error("marker failure")}',a.context);
+  a.calculate();a.reply(0);
+  assert.equal(vm.runInContext('routeRequestPending',a.context),false);
+  assert.equal(a.el('navigation-results').hidden,true);assert.equal(vm.runInContext('routePlan',a.context),null);
+  vm.runInContext('delete globalThis.renderRouteMarkers',a.context);a.calculate();assert.equal(a.requests.length,2);a.reply(1);
+  assert.equal(a.el('navigation-results').hidden,false);
+});
+
+test('a late publishing exception restores visits and labels instead of leaving a partial reorder',()=>{
+  const a=setup();bulkStops(a,2);
+  const note=a.el('route-order-note');let text='';
+  Object.defineProperty(note,'textContent',{get:()=>text,set:value=>{if(value.startsWith('Best evaluated'))throw new Error('view failure');text=value;}});
+  a.calculate();replyRoad(a,0,{order:[1,0]});replyRoad(a,1,{miles:12});
+  assert.equal(vm.runInContext('routeRequestPending',a.context),false);assert.equal(vm.runInContext('routePlan',a.context),null);
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 2']);
+  a.el('route-name').value='Recovered';a.click('save-route');assert.deepEqual(a.savedRoutes().Recovered.stopLabels,['Store 1','Store 2']);
+});
+
+test('Keep My Order ignores an invalid backtracking optimization limit',()=>{
+  const a=setup();a.el('planning-objective').value='backtracking';a.el('backtracking-extra').value='99';a.click('calculate-route');
+  assert.equal(a.requests.length,1);a.reply(0);assert.equal(a.el('navigation-results').hidden,false);
+  assert.match(a.el('route-message').textContent,/^Route calculated:/);
+});
+
+test('manual alternatives say selected, while Keep My Order never claims generated routes or reranking',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});replyRoad(a,1,{miles:30});
+  a.el('route-comparison').children[1].children[0].click();vm.runInContext('presentRouteReadout()',a.context);
+  assert.match(a.el('route-message').textContent,/^Route selected:/);assert.equal(a.el('stat-miles').textContent,'30.0');
+  a.el('vehicle-mpg').value='30';a.el('vehicle-mpg').listeners.input();assert.match(a.el('route-message').textContent,/Est. fuel: \$4.50/);
+  const b=setup();b.click('calculate-route');b.reply(0);b.el('planning-objective').value='time';b.el('planning-objective').listeners.change();
+  assert.match(b.el('route-message').textContent,/^Route calculated:/);assert.equal(b.requests.length,1);
+  const timing=b.el('route-comparison').children[0].textContent;assert.match(timing,/0 generated/);assert.doesNotMatch(timing,/Re-ranked/);
+});
+
+test('route selection buttons use the established button style and shipped scripts do not require Array.at',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});replyRoad(a,1);
+  assert.match(a.el('route-comparison').children[1].children[0].className,/\bbtn\b/);
+  for(const name of ['app.js','route-planning.js'])assert.doesNotMatch(readFileSync(path.join(__dirname,'..',name),'utf8'),/\.at\(/);
 });
 
 function finishTwoStopTrip(a) {

@@ -317,7 +317,7 @@
       if (refreshRouteComparison) refreshRouteComparison();
       const cost = estimatedFuelCost(Number(routePlan.plannedMiles.toFixed(1)));
       document.getElementById("stat-fuel").textContent = cost === null ? "—" : `$${cost.toFixed(2)}`;
-      if (/^Route (?:calculated|optimized):/.test(routeMessage.textContent)) {
+      if (/^Route (?:calculated|optimized|selected):/.test(routeMessage.textContent)) {
         routeMessage.textContent = routeMessage.textContent.replace(/ • Est\. fuel:.*$/, "") +
           (cost === null ? "" : ` • Est. fuel: $${cost.toFixed(2)}`);
       }
@@ -1117,8 +1117,8 @@
 
       try { D7Import.instructions(document.getElementById("route-instructions").value || "", stops.length); }
       catch(error) { routeMessage.textContent=error.message; return; }
-      const extra=Number(document.getElementById("backtracking-extra").value || "10");
-      if(!Number.isFinite(extra) || extra<0 || extra>50){routeMessage.textContent="Enter an extra-mileage limit from 0 to 50 percent.";return;}
+      const extra=readBacktrackingLimit();
+      if(document.getElementById("planning-objective").value==="backtracking" && extra===null){routeMessage.textContent="Enter an extra-mileage limit from 0 to 50 percent.";return;}
       const savedRoutes = getSavedRoutes();
       if (Object.prototype.hasOwnProperty.call(savedRoutes, name) &&
         !window.confirm(`Replace the saved route “${name}”?`)) {
@@ -1128,7 +1128,7 @@
 
       savedRoutes[name] = {
         planningObjective: document.getElementById("planning-objective").value || "fuel",
-        backtrackingExtraPercent: extra,
+        backtrackingExtraPercent: extra ?? 10,
         start,
         stops: [...stops],
         ...(stopLabels.some(Boolean) ? { stopLabels: [...stopLabels] } : {}),
@@ -1383,6 +1383,11 @@
     document.getElementById("backtracking-extra").addEventListener("change", changePlanningObjective);
     document.getElementById("calculate-route").addEventListener("click", () => planRoute(false));
 
+    function readBacktrackingLimit() {
+      const text=String(document.getElementById("backtracking-extra").value).trim();
+      const value=Number(text);
+      return text && Number.isFinite(value) && value>=0 && value<=50 ? value : null;
+    }
     function calculateRoute(optimize = false) {
       const planningStarted = Date.now();
       let directionsRequests = 0;
@@ -1390,8 +1395,11 @@
       let publishing = false;
       let manualSelection = false, elapsed = null;
       let comparisonWarning = "";
+      let limitWarning = "";
       let objective = document.getElementById("planning-objective").value || "fuel";
-      let extraPercent = Number(document.getElementById("backtracking-extra").value || "10");
+      let extraPercent = readBacktrackingLimit();
+      if(optimize && objective==="backtracking" && extraPercent===null) { routeMessage.textContent="Enter an extra-mileage limit from 0 to 50 percent."; return; }
+      extraPercent=extraPercent ?? 10;
       pendingRouteOptimize = optimize;
       // Only the latest request may publish results, including repeated clicks.
       const requestId = ++routeRequestId;
@@ -1453,7 +1461,6 @@
       }
       const constrained = priority!=="efficiency" || requestedFirst.some(Boolean);
       if (!["fuel", "time", "backtracking"].includes(objective)) { routeMessage.textContent = "Choose a supported planning objective."; return; }
-      if (!Number.isFinite(extraPercent) || extraPercent<0 || extraPercent>50) { routeMessage.textContent="Enter an extra-mileage limit from 0 to 50 percent."; return; }
       let tiers = requestedStops.map(()=>1);
       let sectionOffsets = [];
       let activeIndices = requestedStops.map((_, i) => i);
@@ -1507,7 +1514,7 @@
           if(phase!=="baseline")existing.generated=true;
           return;
         }
-        candidates.push({name,key,generated:phase!=="baseline",completed,allLegs,orderedPoints,orderedIndices,distance,duration,turns:detour.turns,reversalMeters:detour.meters});
+        candidates.push({name,key,generated:optimize && phase!=="baseline",completed,allLegs,orderedPoints,orderedIndices,distance,duration,turns:detour.turns,reversalMeters:detour.meters});
       }
       let distanceLimit=Infinity;
       function compare(a,b) {
@@ -1531,7 +1538,7 @@
         if (!current()) return;
         // The initial optimization must succeed. An entered-order measurement
         // is never a substitute for a failed optimization of unordered inputs.
-        const hardFailure=["REQUEST_DENIED","OVER_QUERY_LIMIT","OVER_DAILY_LIMIT"].includes(status);
+        const hardFailure=["REQUEST_DENIED","OVER_DAILY_LIMIT"].includes(status);
         if (phase==="comparison" && candidates.some(c=>c.generated) && !publishing && !hardFailure) {
           comparisonWarning=message+" Comparison incomplete."; comparisonReason="The additional comparison failed."; finishComparison(); return;
         }
@@ -1540,120 +1547,139 @@
       }
       function publish() {
         publishing = true;
-        // Re-ranking a completed plan must remove old map layers and rebuild
-        // labels, First flags and instructions from the original visit IDs.
-        clearRouteResults();
-        const totalDistance = allLegs.reduce((sum, leg) => sum + leg.distance.value, 0);
-        const totalDuration = allLegs.reduce((sum, leg) => sum + leg.duration.value, 0);
-        if (!Number.isFinite(totalDistance) || !Number.isFinite(totalDuration)) {
-          fail("Could not calculate route: invalid route totals. Please try again.");
-          return;
-        }
-        const orderedStops = orderedPoints.slice(1, -1);
-        // Only publish after every section is validated. Intermediate successes
-        // never expose a partial map, navigation, trip snapshot or stop reorder.
-        const markers = typeof renderRouteMarkers === "function"
-          ? renderRouteMarkers(map, { routes: [{ legs: allLegs }] }) : null;
-        routeMarkers = markers || [];
+        const previousDraft={stops:[...stops],labels:[...stopLabels],first:[...stopFirst],instructions:document.getElementById("route-instructions").value};
         try {
-          const fitAll = completed.length > 1 && typeof google.maps.LatLngBounds === "function" &&
-            typeof map.fitBounds === "function";
-          const bounds = fitAll ? new google.maps.LatLngBounds() : null;
-          completed.forEach((result, index) => {
-            const renderer = index === 0 ? directionsRenderer : new google.maps.DirectionsRenderer({
-              polylineOptions: typeof D7_ROUTE_STYLE !== "undefined" ? D7_ROUTE_STYLE : { strokeColor: "#ed2944", strokeWeight: 5 }
-            });
-            if (index > 0) sectionRenderers.push(renderer);
-            if (typeof renderer.setOptions === "function") {
-              renderer.setOptions({ suppressMarkers: !!markers, preserveViewport: !!fitAll });
-            }
-            renderer.setDirections(result);
-            renderer.setMap(map);
-            if (bounds) {
-              // Bounds from actual returned leg coordinates also cover every
-              // section when the provider omits an optional route bounds object.
-              const route = result.routes[0];
-              if (route.bounds) bounds.union(route.bounds);
-              else for (const leg of route.legs) {
-                if (leg.start_location) bounds.extend(leg.start_location);
-                if (leg.end_location) bounds.extend(leg.end_location);
-              }
-            }
-          });
-          if (bounds && !bounds.isEmpty()) map.fitBounds(bounds);
-        } catch {
+          // Re-ranking a completed plan must remove old map layers and rebuild
+          // labels, First flags and instructions from the original visit IDs.
           clearRouteResults();
-          fail("Could not calculate route: the map could not display the complete route. Please try again.");
-          return;
-        }
-        if (optimize && requestedStops.length) {
-          stops.splice(0, stops.length, ...orderedStops);
-          stopLabels.splice(0, stopLabels.length, ...orderedIndices.map(i => requestedLabels[i]));
-          stopFirst.splice(0, stopFirst.length, ...orderedIndices.map(i => requestedFirst[i]));
-          if(parsedInstructions.first.length)document.getElementById("route-instructions").value=D7Import.instructionText({...parsedInstructions, first:orderedIndices.map((original,i)=>parsedInstructions.first.includes(original+1)?i+1:null).filter(Boolean)});
-          renderStops();
-        }
-        document.getElementById("route-order-note").textContent = optimize
-          ? `${manualSelection?"Selected by you. Planning objective":"Best evaluated for"}: ${objective === "fuel" ? "estimated fuel" : objective === "time" ? "driving time" : "less backtracking"}. Requirements take precedence. This is a heuristic, not a guaranteed global optimum. Fuel uses fixed MPG; driving time does not predict arrival traffic. Backtracking weights geographic reversals by distance, within ${extraPercent}% extra mileage of the shortest measured route; it does not detect repeated roads. ${comparisonWarning}` : "Kept your exact entered order.";
-        if(elapsed===null)elapsed=((Date.now()-planningStarted)/1000).toFixed(1);
-        refreshRouteComparison=()=>{
-          const comparison = document.getElementById("route-comparison");
-          comparison.innerHTML = "";
-          routeAlternativeButtons=[];
-          if (optimize) candidates.forEach((candidate,i)=>{
-            const row=document.createElement("p");
-            const miles=candidate.distance/1609.344;
-            const fuel=estimatedFuelCost(Number(miles.toFixed(1)));
-            const rawGallons=positiveNumber(vehicleMpgInput.value) ? miles/Number(vehicleMpgInput.value) : NaN;
-            const gallons=Number.isFinite(rawGallons)?rawGallons:null;
-            row.textContent=`${i===0?(manualSelection?"Selected":"Recommended"):"Alternative "+i} · ${candidate.name}: ${miles.toFixed(1)} mi · ${Math.round(candidate.duration/60)} min${gallons===null?"":` · ${gallons.toFixed(1)} gal est.`}${fuel===null?"":` · $${fuel.toFixed(2)} est.`} · ${candidate.turns===null?"backtracking unavailable":candidate.turns+" geographic reversals, "+(candidate.reversalMeters/1609.344).toFixed(1)+" reversal mi"}${objective==="backtracking" && candidate.distance>distanceLimit?" · Outside extra-mileage limit":""}`;
-            if (optimize && i>0) {
-              const choose=document.createElement("button");choose.type="button";choose.textContent="Use this route";
-              choose.disabled=!!tripProgress;routeAlternativeButtons.push(choose);
-              choose.addEventListener("click",()=>{
-                if(tripProgress || routeRequestPending || !routeShown)return;
-                candidates.splice(candidates.indexOf(candidate),1);candidates.unshift(candidate);({completed,allLegs,orderedPoints,orderedIndices}=candidate);manualSelection=true;publish();
-              });
-              row.appendChild(choose);
-            }
-            comparison.appendChild(row);
-          });
-          const timing=document.createElement("p");
-          timing.textContent=`Planning: ${elapsed} s · ${directionsRequests} Directions requests · ${reusedSections} sections reused · ${candidates.length} distinct complete ${candidates.length===1?"route":"routes"} evaluated (${candidates.filter(c=>c.generated).length} generated). ${comparisonReason}${objective==="backtracking" && candidates.some(c=>c.turns===null)?" Coordinates unavailable; ranked by mileage instead.":""}`;
-          comparison.appendChild(timing);
-        };
-        refreshRouteComparison();
-        rerankRouteCandidates=()=>{
-          const next=document.getElementById("planning-objective").value || "fuel";
-          const limit=Number(document.getElementById("backtracking-extra").value || "10");
-          if(!["fuel","time","backtracking"].includes(next) || !Number.isFinite(limit) || limit<0 || limit>50) {
-            routeMessage.textContent="Enter an extra-mileage limit from 0 to 50 percent.";return;
+          const totalDistance = allLegs.reduce((sum, leg) => sum + leg.distance.value, 0);
+          const totalDuration = allLegs.reduce((sum, leg) => sum + leg.duration.value, 0);
+          if (!Number.isFinite(totalDistance) || !Number.isFinite(totalDuration)) {
+            fail("Could not calculate route: invalid route totals. Please try again.");
+            return;
           }
-          objective=next;extraPercent=limit;
-          comparisonReason="Re-ranked the already measured routes without new mapping requests. Plan Route searches for additional candidates for the selected objective.";
-          finishComparison();updatePrioritySummary();
-        };
-        routeRequestPending = false;
-        routeShown = true;
-        routeStaleWarning.hidden = true;
-        showNavigation(orderedPoints);
-        routePlan = {
-          start: origin, stops: orderedStops, destination,
-          ...(stopLabels.some(Boolean) ? {stopLabels:[...stopLabels]} : {}),
-          plannedMiles: totalDistance / 1609.344,
-          plannedMinutes: totalDuration / 60,
-          legs: allLegs.map((leg, index) => ({
-            from: orderedPoints[index], to: orderedPoints[index + 1],
-            plannedMiles: leg.distance.value / 1609.344,
-            plannedMinutes: leg.duration.value / 60
-          }))
-        };
-        const miles = (totalDistance / 1609.344).toFixed(1);
-        const minutes = Math.round(totalDuration / 60);
-        const estimate = estimatedFuelCost(Number(miles));
-        const fuelCost = estimate === null ? "" : ` • Est. fuel: $${estimate.toFixed(2)}`;
-        routeMessage.textContent =
-          `${optimize ? "Route optimized" : "Route calculated"}: ${miles} miles • ${minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`}${fuelCost}`;
+          const orderedStops = orderedPoints.slice(1, -1);
+          // Only publish after every section is validated. Intermediate successes
+          // never expose a partial map, navigation, trip snapshot or stop reorder.
+          const markers = typeof renderRouteMarkers === "function"
+            ? renderRouteMarkers(map, { routes: [{ legs: allLegs }] }) : null;
+          routeMarkers = markers || [];
+          try {
+            const fitAll = completed.length > 1 && typeof google.maps.LatLngBounds === "function" &&
+              typeof map.fitBounds === "function";
+            const bounds = fitAll ? new google.maps.LatLngBounds() : null;
+            completed.forEach((result, index) => {
+              const renderer = index === 0 ? directionsRenderer : new google.maps.DirectionsRenderer({
+                polylineOptions: typeof D7_ROUTE_STYLE !== "undefined" ? D7_ROUTE_STYLE : { strokeColor: "#ed2944", strokeWeight: 5 }
+              });
+              if (index > 0) sectionRenderers.push(renderer);
+              if (typeof renderer.setOptions === "function") {
+                renderer.setOptions({ suppressMarkers: !!markers, preserveViewport: !!fitAll });
+              }
+              renderer.setDirections(result);
+              renderer.setMap(map);
+              if (bounds) {
+                // Bounds from actual returned leg coordinates also cover every
+                // section when the provider omits an optional route bounds object.
+                const route = result.routes[0];
+                if (route.bounds) bounds.union(route.bounds);
+                else for (const leg of route.legs) {
+                  if (leg.start_location) bounds.extend(leg.start_location);
+                  if (leg.end_location) bounds.extend(leg.end_location);
+                }
+              }
+            });
+            if (bounds && !bounds.isEmpty()) map.fitBounds(bounds);
+          } catch {
+            stops.splice(0,stops.length,...previousDraft.stops);
+            stopLabels.splice(0,stopLabels.length,...previousDraft.labels);
+            stopFirst.splice(0,stopFirst.length,...previousDraft.first);
+            document.getElementById("route-instructions").value=previousDraft.instructions;
+            try { renderStops(); } catch { /* Keep the recovered draft even if its view cannot refresh. */ }
+            clearRouteResults();
+            fail("Could not calculate route: the map could not display the complete route. Please try again.");
+            return;
+          }
+          if (optimize && requestedStops.length) {
+            stops.splice(0, stops.length, ...orderedStops);
+            stopLabels.splice(0, stopLabels.length, ...orderedIndices.map(i => requestedLabels[i]));
+            stopFirst.splice(0, stopFirst.length, ...orderedIndices.map(i => requestedFirst[i]));
+            if(parsedInstructions.first.length)document.getElementById("route-instructions").value=D7Import.instructionText({...parsedInstructions, first:orderedIndices.map((original,i)=>parsedInstructions.first.includes(original+1)?i+1:null).filter(Boolean)});
+            renderStops();
+          }
+          document.getElementById("route-order-note").textContent = optimize
+            ? `${manualSelection?"Selected by you. Planning objective":"Best evaluated for"}: ${objective === "fuel" ? "estimated fuel" : objective === "time" ? "driving time" : "less backtracking"}. Requirements take precedence. This is a heuristic, not a guaranteed global optimum. Fuel uses fixed MPG; driving time does not predict arrival traffic. Backtracking weights geographic reversals by distance, within ${extraPercent}% extra mileage of the shortest measured route; it does not detect repeated roads. ${comparisonWarning} ${limitWarning}` : "Kept your exact entered order.";
+          if(elapsed===null)elapsed=((Date.now()-planningStarted)/1000).toFixed(1);
+          refreshRouteComparison=()=>{
+            const comparison = document.getElementById("route-comparison");
+            comparison.innerHTML = "";
+            routeAlternativeButtons=[];
+            if (optimize) candidates.forEach((candidate,i)=>{
+              const row=document.createElement("p");
+              const miles=candidate.distance/1609.344;
+              const fuel=estimatedFuelCost(Number(miles.toFixed(1)));
+              const rawGallons=positiveNumber(vehicleMpgInput.value) ? miles/Number(vehicleMpgInput.value) : NaN;
+              const gallons=Number.isFinite(rawGallons)?rawGallons:null;
+              row.textContent=`${i===0?(manualSelection?"Selected":"Recommended"):"Alternative "+i} · ${candidate.name}: ${miles.toFixed(1)} mi · ${Math.round(candidate.duration/60)} min${gallons===null?"":` · ${gallons.toFixed(1)} gal est.`}${fuel===null?"":` · $${fuel.toFixed(2)} est.`} · ${candidate.turns===null?"backtracking unavailable":candidate.turns+" geographic reversals, "+(candidate.reversalMeters/1609.344).toFixed(1)+" reversal mi"}${objective==="backtracking" && candidate.distance>distanceLimit?" · Outside extra-mileage limit":""}`;
+              if (optimize && i>0) {
+                const choose=document.createElement("button");choose.type="button";choose.className="btn route-choice";choose.textContent="Use this route";
+                choose.disabled=!!tripProgress;routeAlternativeButtons.push(choose);
+                choose.addEventListener("click",()=>{
+                  if(tripProgress || routeRequestPending || !routeShown)return;
+                  candidates.splice(candidates.indexOf(candidate),1);candidates.unshift(candidate);({completed,allLegs,orderedPoints,orderedIndices}=candidate);manualSelection=true;publish();
+                });
+                row.appendChild(choose);
+              }
+              comparison.appendChild(row);
+            });
+            const timing=document.createElement("p");
+            timing.textContent=`Planning: ${elapsed} s · ${directionsRequests} Directions requests · ${reusedSections} sections reused · ${candidates.length} distinct complete ${candidates.length===1?"route":"routes"} evaluated (${candidates.filter(c=>c.generated).length} generated). ${comparisonReason}${objective==="backtracking" && candidates.some(c=>c.turns===null)?" Coordinates unavailable; ranked by mileage instead.":""}`;
+            comparison.appendChild(timing);
+          };
+          refreshRouteComparison();
+          rerankRouteCandidates=()=>{
+            const next=document.getElementById("planning-objective").value || "fuel";
+            if(!["fuel","time","backtracking"].includes(next))return;
+            objective=next;
+            if(!optimize)return; // Objectives do not alter a Keep My Order result.
+            const limit=readBacktrackingLimit();
+            if(limit!==null)extraPercent=limit;
+            limitWarning=objective==="backtracking" && limit===null ? `Invalid mileage limit. The displayed comparison uses the last valid ${extraPercent}%; correct the visible limit before planning or saving.` : "";
+            comparisonReason="Re-ranked the already measured routes without new mapping requests. Plan Route searches for additional candidates for the selected objective.";
+            finishComparison();updatePrioritySummary();
+          };
+          routeRequestPending = false;
+          routeShown = true;
+          routeStaleWarning.hidden = true;
+          showNavigation(orderedPoints);
+          routePlan = {
+            start: origin, stops: orderedStops, destination,
+            ...(stopLabels.some(Boolean) ? {stopLabels:[...stopLabels]} : {}),
+            plannedMiles: totalDistance / 1609.344,
+            plannedMinutes: totalDuration / 60,
+            legs: allLegs.map((leg, index) => ({
+              from: orderedPoints[index], to: orderedPoints[index + 1],
+              plannedMiles: leg.distance.value / 1609.344,
+              plannedMinutes: leg.duration.value / 60
+            }))
+          };
+          const miles = (totalDistance / 1609.344).toFixed(1);
+          const minutes = Math.round(totalDuration / 60);
+          const estimate = estimatedFuelCost(Number(miles));
+          const fuelCost = estimate === null ? "" : ` • Est. fuel: $${estimate.toFixed(2)}`;
+          routeMessage.textContent =
+            `${optimize ? (manualSelection ? "Route selected" : "Route optimized") : "Route calculated"}: ${miles} miles • ${minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`}${fuelCost}`;
+        } catch {
+          stops.splice(0,stops.length,...previousDraft.stops);
+          stopLabels.splice(0,stopLabels.length,...previousDraft.labels);
+          stopFirst.splice(0,stopFirst.length,...previousDraft.first);
+          document.getElementById("route-instructions").value=previousDraft.instructions;
+          try { renderStops(); } catch { /* Preserve the recovered draft. */ }
+          clearRouteResults();
+          fail("Could not calculate route: the complete route could not be displayed. Please try again.");
+        } finally {
+          routeRequestPending=false;
+        }
       }
       function pumpSections() {
         if (!current() || !routeRequestPending || paused) return;
@@ -1733,7 +1759,7 @@
               ids = order.map(i => intermediateIndices[i]);
             }
             if(sectionOffset+section.length-1 < activeIndices.length+1)ids.push(activeIndices[sectionOffset+intermediate.length]);
-            const measuredPath=[section[0],...ordered,section.at(-1)];
+            const measuredPath=[section[0],...ordered,section[section.length-1]];
             sectionCache.set(JSON.stringify(measuredPath),result);
             sectionResults.set(section,{result,legs:route.legs,points:[...ordered,section[section.length-1]],ids});
             if(sectionResults.size!==sections.length) { pumpSections(); return; }
@@ -1789,7 +1815,7 @@
         try {
           directionsRequests++;
           directionsService.route({
-            origin: section[0], destination: section.at(-1),
+            origin: section[0], destination: section[section.length-1],
             waypoints: intermediate.map(location=>({location,stopover:true})),
             optimizeWaypoints: optimize && phase === "final", travelMode: google.maps.TravelMode.DRIVING
           },onResult);
@@ -1803,12 +1829,12 @@
     }
 
     updateStopCounter();
-  
+
     function presentRouteReadout() {
       const message = document.getElementById("route-message");
       if (!message) return;
       const text = message.textContent || "";
-      const matched = text.match(/^Route (?:calculated|optimized): ([\d.]+) miles • ([^•]+?)(?: • Est\. fuel: (\$[\d.]+))?$/);
+      const matched = text.match(/^Route (?:calculated|optimized|selected): ([\d.]+) miles • ([^•]+?)(?: • Est\. fuel: (\$[\d.]+))?$/);
       const milesEl = document.getElementById("stat-miles");
       const unitEl = document.getElementById("stat-miles-unit");
       const durationEl = document.getElementById("stat-duration");

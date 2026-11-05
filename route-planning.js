@@ -26,7 +26,7 @@
     // Consecutive colocated visits remain separate visits, but must not hide
     // the heading change between the incoming and outgoing nonzero legs.
     const distinct=[];
-    for(const p of points)if(!distinct.length || distance(p,distinct.at(-1))>1)distinct.push(p);
+    for(const p of points)if(!distinct.length || distance(p,distinct[distinct.length-1])>1)distinct.push(p);
     let turns=0,meters=0;
     for(let i=1;i<distinct.length-1;i++) {
       const excess=reversal(distinct[i-1],distinct[i],distinct[i+1]);
@@ -45,7 +45,7 @@
     const points=Array(count+2);
     points[0]=coordinate(legs[0]?.start_location);
     indices.forEach((id,i)=>{points[id+1]=coordinate(legs[i]?.end_location);});
-    points[count+1]=coordinate(legs.at(-1)?.end_location);
+    points[count+1]=coordinate(legs[legs.length-1]?.end_location);
     if(Array.from(points).some(p=>!p))return null;
     const size=points.length, matrix=new Float64Array(size*size);
     for(let a=0;a<size;a++)for(let b=a+1;b<size;b++)matrix[a*size+b]=matrix[b*size+a]=distance(points[a],points[b]);
@@ -76,7 +76,12 @@
     }
     function generate(objective,primary=false) {
       const pool=[],seen=new Set(),groups=[...new Set(tiers)].sort((a,b)=>a-b);
-      const edge=objective==="time"?time:geo;
+      let timeMatrix=null;
+      if(objective==="time") {
+        timeMatrix=new Float64Array(size*size);
+        for(let a=0;a<size;a++)for(let b=0;b<size;b++)timeMatrix[a*size+b]=time(a,b);
+      }
+      const edge=timeMatrix ? (a,b)=>timeMatrix[a*size+b] : geo;
       const add=ids=>{
         const order=ids.slice(1,-1).map(i=>i-1),key=order.join(",");
         if(!seen.has(key)){seen.add(key);pool.push({indices:order,...metrics(order,objective)});}
@@ -87,7 +92,7 @@
           const remaining=new Set(tiers.flatMap((t,i)=>t===tier?[i+1]:[]));
           let first=true;
           while(remaining.size) {
-            const prev=ids.at(-1),before=ids.at(-2);
+            const prev=ids[ids.length-1],before=ids[ids.length-2];
             const ranked=[...remaining].map(id=>({id,cost:edge(prev,id)+(objective==="backtracking" && before!==undefined?reversal(points[before],points[prev],points[id]):0)}))
               .sort((a,b)=>a.cost-b.cost || a.id-b.id);
             const next=ranked[first?Math.min(seed,ranked.length-1):0].id;
@@ -102,7 +107,7 @@
             let changed=false;
             for(let i=1;i<ids.length-1;i++)for(let j=1;j<ids.length-1;j++) {
               if(j===i || j===i-1 || tiers[ids[i]-1]!==tiers[ids[j]-1])continue;
-              const [a,x,b]=ids.slice(i-1,i+2),c=ids[j],d=ids[j+1];
+              const a=ids[i-1],x=ids[i],b=ids[i+1],c=ids[j],d=ids[j+1];
               const delta=edge(a,b)+edge(c,x)+edge(x,d)-edge(a,x)-edge(x,b)-edge(c,d);
               if(delta < -1e-6){ids.splice(i,1);ids.splice(j<i?j+1:j,0,x);changed=true;break;}
             }
