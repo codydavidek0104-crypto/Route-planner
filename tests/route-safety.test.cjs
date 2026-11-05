@@ -38,6 +38,8 @@ function setup(confirmations = [], {
   };
   el('vehicle-mpg').value = '15';
   el('fuel-price').value = '4.50';
+  el('backtracking-extra').value = '10';
+  el('backtracking-area').value = '25';
   const requests = [];
   const mapsInstances = [];
   const renderers = [];
@@ -144,6 +146,7 @@ function setup(confirmations = [], {
   el('fuel-settings').hidden = /\shidden(?:\s|=|>)/.test(fuelTag);
   if (mapTheme) vm.runInContext(readFileSync(path.join(__dirname, '../map-theme.js'), 'utf8'), context);
   vm.runInContext(readFileSync(path.join(__dirname, '../stop-import.js'), 'utf8'), context);
+  vm.runInContext(readFileSync(path.join(__dirname, '../route-planning.js'), 'utf8'), context);
   vm.runInContext(readFileSync(path.join(__dirname, '../app.js'), 'utf8'), context);
   if (init) vm.runInContext('initMap()', context);
   const click = id => el(id).listeners.click();
@@ -201,6 +204,369 @@ function replyWithCoordinates(a,index,{cost=1,reverse=false}={}) {
   })));
 }
 
+// Legacy workflow assertions still inspect the first optimized route. Complete
+// the new optional comparison with an intentionally more expensive alternative.
+function finishComparison(a) {
+  let index=a.requests.length-1;
+  while(vm.runInContext('routeRequestPending',a.context)) {
+    replyWithCoordinates(a,index++,{cost:100000});
+    assert.ok(index<30);
+  }
+}
+
+function replyRoad(a,index,{order, miles=10, minutes=20}={}) {
+  const request=a.requests[index];
+  order=order || request.options.waypoints.map((_,i)=>i);
+  const addresses=[request.options.origin,...order.map(i=>request.options.waypoints[i].location),request.options.destination];
+  const locations={'Origin':{lat:0,lng:0},'Stop 1':{lat:0,lng:1},'Stop 2':{lat:0,lng:2},'End':{lat:0,lng:3}};
+  a.reply(index,'OK',order,addresses.slice(1).map((to,i)=>({
+    start_location:locations[addresses[i]],end_location:locations[to],
+    distance:{value:miles*1609.344/(addresses.length-1)},duration:{value:minutes*60/(addresses.length-1)}
+  })));
+}
+
+for(const objective of ['fuel','time','backtracking'])test(`${objective} ranks distinct complete routes using the selected objective`,()=>{
+  const a=setup();bulkStops(a,2);a.el('planning-objective').value=objective;a.el('backtracking-extra').value='25';a.calculate();
+  replyRoad(a,0,{order:[1,0],miles:10,minutes:20});
+  assert.equal(a.el('navigation-results').hidden,true,'Do not publish an unevaluated recommendation');
+  assert.equal(a.requests.length,2);
+  assert.equal(a.requests[1].options.optimizeWaypoints,false,'Measure the exact alternate order');
+  replyRoad(a,1,{miles:12,minutes:10});
+  const expected=objective!=='time'?['Stop 2','Stop 1']:['Stop 1','Stop 2'];
+  assert.deepEqual([...a.el('stops-container').children].map(row=>row.children[1].value),expected);
+  const rows=a.el('route-comparison').children.map(row=>row.textContent);
+  assert.match(rows[0],/^Recommended/);assert.match(rows[1],/^Alternative 1/);
+  assert.match(rows[0],objective!=='time'?/10.0 mi · 20 min.*0 area returns/:/12.0 mi · 10 min.*0 area returns/);
+  assert.match(rows[2],/2 Directions requests.*2 distinct complete routes/);
+  a.click('start-trip');const snapshot=JSON.parse(a.stored.d7TripProgress).routeSnapshot;
+  assert.deepEqual(snapshot.stops,expected);assert.equal(snapshot.start,'Origin');assert.equal(snapshot.destination,'End');
+  assert.deepEqual(snapshot.stopLabels,expected.map(address=>'Store '+address.split(' ')[1]));
+});
+
+test('early stops exclude the cheaper noncompliant baseline from recommendations',()=>{
+  const a=setup();bulkStops(a,4);
+  vm.runInContext('stopFirst[2]=true;renderStops()',a.context);
+  a.calculate();let i=0;
+  while(i<a.requests.length){replyWithCoordinates(a,i,{cost:i===0?.01:2});i++;assert.ok(i<15);}
+  const addresses=a.el('stops-container').children.map(row=>row.children[1].value);
+  assert.equal(addresses[0],'Stop 3');
+  const rows=a.el('route-comparison').children.map(row=>row.textContent);
+  assert.ok(rows.filter(row=>/^(Recommended|Alternative)/.test(row)).length>=1);
+  assert.ok(rows.every(row=>!row.includes('Entered order')));
+  assert.equal(a.requests[0].options.optimizeWaypoints,false);
+});
+
+for(const failure of ['timeout','ZERO_RESULTS','malformed'])test(`optional ${failure} comparison retains the complete compliant plan and ignores late replies`,()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});
+  if(failure==='timeout')a.advance(20000);
+  else if(failure==='malformed')a.reply(1,'OK',[],[]);
+  else a.reply(1,failure);
+  assert.equal(a.el('navigation-results').hidden,false);
+  assert.match(a.el('route-order-note').textContent,/Comparison incomplete/);
+  const message=a.el('route-message').textContent;
+  replyRoad(a,1,{miles:1,minutes:1});a.advance(20000);
+  assert.equal(a.el('route-message').textContent,message);
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 2','Stop 1']);
+});
+
+test('editing the objective cancels a pending comparison without exposing old results',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});
+  a.el('planning-objective').value='time';a.el('planning-objective').listeners.change();replyRoad(a,1);
+  assert.equal(a.el('navigation-results').hidden,true);assert.equal(a.el('route-comparison').children.length,0);
+});
+
+test('planning objective round trips saved routes and backups; legacy routes default to fuel',async()=>{
+  const a=setup();a.el('planning-objective').value='backtracking';a.el('route-name').value='Job';a.click('save-route');
+  assert.equal(a.savedRoutes().Job.planningObjective,'backtracking');
+  a.click('export-routes');const backup=await a.blobs.at(-1).text();
+  const b=setup();b.el('import-routes-file').files=[{size:backup.length,text:async()=>backup}];
+  await b.el('import-routes-file').listeners.change();
+  b.el('saved-route-select').value='Job';b.click('load-route');assert.equal(b.el('planning-objective').value,'backtracking');
+  const legacy=setup([],{storage:{d7SavedRoutes:JSON.stringify({Old:{start:'O',stops:['S'],destination:'D'}})}});
+  legacy.el('planning-objective').value='time';legacy.el('saved-route-select').value='Old';legacy.click('load-route');
+  assert.equal(legacy.el('planning-objective').value,'fuel');
+});
+
+test('bounded section concurrency assembles out-of-order responses and measures a 100-stop plan',()=>{
+  const a=setup();bulkStops(a,100);a.calculate();
+  const answered=new Set();let rounds=0;
+  while(vm.runInContext('routeRequestPending',a.context)) {
+    const batch=a.requests.map((r,i)=>i).filter(i=>!answered.has(i));
+    assert.ok(batch.length>0 && batch.length<=2,'At most two requests in flight');
+    a.advance(1000);rounds++;
+    for(const i of batch.reverse()){answered.add(i);replyWithCoordinates(a,i,{cost:i<4?1:2});}
+    assert.ok(rounds<10);
+  }
+  assert.equal(a.requests.length,12);assert.equal(rounds,6);
+  assert.match(a.el('route-comparison').children.at(-1).textContent,/Planning: 6.0 s · 12 Directions requests/);
+  a.click('start-trip');const snapshot=JSON.parse(a.stored.d7TripProgress).routeSnapshot;
+  assert.equal(snapshot.legs.length,101);assert.equal(new Set(snapshot.stops).size,100);
+  snapshot.legs.slice(1).forEach((leg,i)=>assert.equal(leg.from,snapshot.legs[i].to));
+});
+
+test('500-stop optimized round trip retains every visit and uses a bounded number of requests',()=>{
+  const a=setup();const names=bulkStops(a,500);a.destination('Origin');a.calculate();let i=0;
+  while(i<a.requests.length){replyWithCoordinates(a,i++);assert.ok(i<=60);}
+  assert.equal(a.el('navigation-results').hidden,false);a.click('start-trip');
+  const snapshot=JSON.parse(a.stored.d7TripProgress).routeSnapshot;
+  assert.deepEqual([...snapshot.stops].sort(),[...names].sort());assert.equal(snapshot.legs.length,501);
+  assert.equal(snapshot.start,'Origin');assert.equal(snapshot.destination,'Origin');
+  assert.match(a.el('route-comparison').children.at(-1).textContent,/2 generated/);
+});
+
+test('parallel length-limit splitting keeps section offsets correct while another section replies',()=>{
+  const a=setup();bulkStops(a,100);a.calculate();assert.equal(a.requests.length,2);
+  a.reply(0,'MAX_ROUTE_LENGTH_EXCEEDED');replyWithCoordinates(a,1);
+  let i=2;while(i<a.requests.length){replyWithCoordinates(a,i++);assert.ok(i<20);}
+  a.click('start-trip');const snapshot=JSON.parse(a.stored.d7TripProgress).routeSnapshot;
+  assert.equal(snapshot.stops.length,100);assert.equal(new Set(snapshot.stops).size,100);assert.equal(snapshot.legs.length,101);
+  snapshot.legs.slice(1).forEach((leg,i)=>assert.equal(leg.from,snapshot.legs[i].to));
+});
+
+test('repeated addresses retain independent labels and early flags after comparison',()=>{
+  const a=setup();bulkStops(a,3);
+  vm.runInContext("stops[0]='Stop 2';stopFirst[0]=true;renderStops()",a.context);
+  a.calculate();let i=0;while(i<a.requests.length){replyWithCoordinates(a,i++);assert.ok(i<12);}
+  a.el('route-name').value='Duplicates';a.click('save-route');const saved=a.savedRoutes().Duplicates;
+  assert.equal(saved.stops.filter(x=>x==='Stop 2').length,2);assert.equal(new Set(saved.stopLabels).size,3);
+  assert.equal(saved.stopLabels[0],'Store 1');assert.equal(saved.stopFirst[0],true);
+});
+
+test('comparison fuel estimates refresh without requests and remain frozen during an active trip',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});replyRoad(a,1,{miles:12});
+  const rows=()=>a.el('route-comparison').children.map(row=>row.textContent);
+  a.el('vehicle-mpg').value='10';a.el('vehicle-mpg').listeners.input();
+  assert.match(rows()[0],/1.0 gal est./);assert.match(rows()[1],/1.2 gal est./);
+  a.click('start-trip');const before=rows();a.el('vehicle-mpg').value='20';a.el('vehicle-mpg').listeners.input();
+  assert.deepEqual(rows(),before);assert.equal(a.requests.length,2);
+});
+
+for(const failure of ['REQUEST_DENIED','OVER_QUERY_LIMIT','timeout'])test(`a main optimization ${failure} cannot publish the unordered baseline`,()=>{
+  const a=setup();const names=bulkStops(a,100);a.calculate();
+  for(let i=0;i<4;i++)replyWithCoordinates(a,i);
+  assert.equal(a.requests.length,6);
+  if(failure==='timeout')a.advance(20000);
+  else {
+    a.reply(4,failure);
+    if(failure==='OVER_QUERY_LIMIT'){a.advance(1000);a.reply(6,failure);}
+  }
+  assert.equal(a.el('navigation-results').hidden,true);assert.equal(a.renderers[0].map,null);
+  assert.equal(vm.runInContext('routePlan',a.context),null);
+  assert.doesNotMatch(a.el('route-message').textContent,/Route optimized|No second distinct/);
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),names);
+  replyWithCoordinates(a,5);assert.equal(a.el('navigation-results').hidden,true);
+});
+
+for(const status of ['REQUEST_DENIED','OVER_QUERY_LIMIT'])test(`optional comparison ${status} preserves only the appropriate authorization/rate-limit behavior`,()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});a.reply(1,status);
+  if(status==='OVER_QUERY_LIMIT'){a.advance(1000);a.reply(2,status);}
+  if(status==='REQUEST_DENIED') {
+    assert.equal(a.el('navigation-results').hidden,true);assert.match(a.el('route-message').textContent,new RegExp(status));
+    assert.equal(vm.runInContext('routePlan',a.context),null);
+  } else {
+    assert.equal(a.el('navigation-results').hidden,false);assert.match(a.el('route-order-note').textContent,/OVER_QUERY_LIMIT.*Comparison incomplete/);
+    assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 2','Stop 1']);
+  }
+});
+
+test('temporary throttling waits before one bounded retry and ignores duplicate/late callbacks',()=>{
+  const a=setup();a.calculate();a.reply(0,'OVER_QUERY_LIMIT');assert.equal(a.requests.length,1);
+  a.advance(999);assert.equal(a.requests.length,1);a.advance(1);assert.equal(a.requests.length,2);
+  a.reply(0,'OK');assert.equal(a.el('navigation-results').hidden,true);a.reply(1);
+  assert.equal(a.el('navigation-results').hidden,false);a.advance(30000);assert.equal(a.requests.length,2);
+});
+
+test('repeated Plan clicks share pending work and active trips disable alternative selection',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();a.calculate();assert.equal(a.requests.length,1);
+  replyRoad(a,0,{order:[1,0]});a.calculate();assert.equal(a.requests.length,2);replyRoad(a,1,{miles:12});
+  const button=a.el('route-comparison').children[1].children[0];a.click('start-trip');assert.equal(button.disabled,true);
+  button.click();assert.deepEqual(JSON.parse(a.stored.d7TripProgress).routeSnapshot.stops,['Stop 2','Stop 1']);
+});
+
+test('changing objective reranks measured routes with no requests and retains labels/First rules',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0],miles:10,minutes:20});replyRoad(a,1,{miles:10.5,minutes:10});
+  const messages=a.requests.length;
+  for(const objective of ['time','fuel','backtracking','time']) {
+    a.el('planning-objective').value=objective;a.el('planning-objective').listeners.change();
+    assert.equal(a.requests.length,messages);assert.equal(a.el('navigation-results').hidden,false);
+    const addresses=a.el('stops-container').children.map(row=>row.children[1].value);
+    assert.deepEqual(addresses,objective!=='time'?['Stop 2','Stop 1']:['Stop 1','Stop 2']);
+    a.el('route-name').value='Cache';a.click('save-route');
+    const save=a.savedRoutes().Cache;assert.deepEqual(save.stopLabels,save.stops.map(s=>'Store '+s.split(' ')[1]));
+    assert.match(a.el('route-comparison').children.at(-1).textContent,/without new mapping requests/);
+  }
+});
+
+function replyArea(a,index,{order,miles=100}={}) {
+  const request=a.requests[index].options;
+  const waypoints=request.waypoints.map(w=>w.location);
+  const addresses=[request.origin,...(order?order.map(i=>waypoints[i]):waypoints),request.destination];
+  const locations={Origin:{lat:0,lng:-1},'Stop 1':{lat:0,lng:0},'Stop 2':{lat:0,lng:2},'Stop 3':{lat:0,lng:.1},End:{lat:0,lng:3}};
+  a.reply(index,'OK',order,addresses.slice(1).map((to,i)=>({start_location:locations[addresses[i]],end_location:locations[to],distance:{value:miles*1609.344/(addresses.length-1)},duration:{value:600}})));
+}
+
+test('area-return mileage guard and radius rerank cached routes without requests',()=>{
+  const a=setup();bulkStops(a,3);a.el('planning-objective').value='backtracking';a.calculate();
+  replyArea(a,0,{order:[0,1,2],miles:100});assert.equal(a.requests.length,2);
+  replyArea(a,1,{miles:115});
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 2','Stop 3']);
+  assert.match(a.el('route-comparison').children[0].textContent,/1 area returns/);
+  assert.match(a.el('route-comparison').children[1].textContent,/Outside extra-mileage limit/);
+  a.el('backtracking-extra').value='20';a.el('backtracking-extra').listeners.change();
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 3','Stop 2']);
+  assert.match(a.el('route-comparison').children[0].textContent,/0 area returns/);
+  a.el('backtracking-extra').value='0';a.el('backtracking-extra').listeners.change();
+  a.el('backtracking-area').value='1';a.el('backtracking-area').listeners.change();
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 2','Stop 3']);
+  assert.match(a.el('route-comparison').children[0].textContent,/0 area returns/);
+  assert.equal(a.requests.length,2);
+});
+
+test('duplicate-address depot routes preserve visits without counting the final return',()=>{
+  const a=setup();bulkStops(a,2);vm.runInContext("stops.splice(0,2,'Stop 2','Stop 2');renderStops()",a.context);a.destination('Origin');a.calculate();
+  replyWithCoordinates(a,0);assert.equal(a.requests.length,1);
+  assert.match(a.el('route-comparison').children[0].textContent,/0 area returns/);
+  a.click('start-trip');assert.equal(JSON.parse(a.stored.d7TripProgress).routeSnapshot.stops.length,2);
+});
+
+test('comparison progress has busy styling and a large generated route can win over input order',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});vm.runInContext('presentRouteReadout()',a.context);
+  assert.match(a.el('route-message').className,/is-busy/);assert.doesNotMatch(a.el('route-message').className,/is-error/);
+  const b=setup();const original=bulkStops(b,100);b.calculate();let i=0;
+  while(i<b.requests.length){replyWithCoordinates(b,i,{cost:i<4?10:1});i++;assert.ok(i<20);}
+  const result=b.el('stops-container').children.map(row=>row.children[1].value);
+  assert.notDeepEqual(result,original);assert.deepEqual([...result].sort(),[...original].sort());
+  assert.doesNotMatch(b.el('route-comparison').children[0].textContent,/Entered order/);
+  assert.match(b.el('route-comparison').children.at(-1).textContent,/2 generated/);
+});
+
+test('a displayed alternative can be selected without losing its measured route or navigation',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0],miles:10});replyRoad(a,1,{miles:12});
+  a.el('route-comparison').children[1].children[0].click();
+  assert.match(a.el('route-comparison').children[0].textContent,/Selected.*12.0 mi/);
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 2']);
+  a.click('start-trip');assert.equal(JSON.parse(a.stored.d7TripProgress).routeSnapshot.plannedMiles,12);
+  assert.equal(a.requests.length,2);
+});
+
+test('a localized alternative reuses unchanged complete section responses',()=>{
+  const a=setup();bulkStops(a,100);a.calculate();let i=0;
+  const coordinate=address=>{
+    const n=Number(address.split(' ')[1]);
+    if(address==='Origin')return {lat:0,lng:0};if(address==='End')return {lat:0,lng:11};
+    return n===1?{lat:.1,lng:.1}:n===2?{lat:-.1,lng:.1}:{lat:0,lng:n*.1};
+  };
+  while(i<a.requests.length) {
+    const r=a.requests[i],p=[r.options.origin,...r.options.waypoints.map(w=>w.location),r.options.destination];
+    const order=r.options.waypoints.map((_,k)=>k);
+    a.reply(i++,'OK',order,p.slice(1).map((to,k)=>({start_location:coordinate(p[k]),end_location:coordinate(to),distance:{value:1000},duration:{value:60}})));
+    assert.ok(i<15);
+  }
+  const timing=a.el('route-comparison').children.at(-1).textContent;
+  assert.match(timing,/[1-9] sections reused/);assert.match(timing,/2 generated/);
+  a.click('start-trip');const snapshot=JSON.parse(a.stored.d7TripProgress).routeSnapshot;
+  assert.equal(snapshot.legs.length,101);assert.equal(new Set(snapshot.stops).size,100);
+});
+
+test('extra-mileage limits round trip and invalid limits cannot replace saved data',async()=>{
+  const a=setup();a.el('planning-objective').value='backtracking';a.el('route-name').value='Limit';a.el('backtracking-extra').value='0';a.click('save-route');
+  assert.equal(a.savedRoutes().Limit.backtrackingExtraPercent,0);
+  a.el('backtracking-extra').value='99';a.click('save-route');assert.equal(a.savedRoutes().Limit.backtrackingExtraPercent,0);
+  a.el('saved-route-select').value='Limit';a.click('load-route');assert.equal(a.el('backtracking-extra').value,'0');
+  a.click('export-routes');const backup=JSON.parse(await a.blobs.at(-1).text());
+  backup.routes.Limit.backtrackingExtraPercent=99;const json=JSON.stringify(backup),before=a.stored.d7SavedRoutes;
+  a.el('import-routes-file').files=[{size:json.length,text:async()=>json}];await a.el('import-routes-file').listeners.change();
+  assert.equal(a.stored.d7SavedRoutes,before);
+});
+
+for(const invalid of ['99',''])test(`an invalid '${invalid}' backtracking limit cannot block a hidden fuel/time objective`,()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0],miles:10});replyRoad(a,1,{miles:10.5});
+  const requests=a.requests.length;
+  a.el('planning-objective').value='backtracking';a.el('planning-objective').listeners.change();
+  a.el('backtracking-extra').value=invalid;a.el('backtracking-extra').listeners.change();
+  assert.match(a.el('route-order-note').textContent,/Invalid mileage limit.*last valid 10%/);
+  assert.match(a.el('route-order-note').textContent,/less backtracking/);
+  a.calculate();assert.equal(a.requests.length,requests);assert.equal(a.el('navigation-results').hidden,false,'Invalid planning inputs do not clear a good displayed plan');
+  for(const objective of ['fuel','time']) {
+    a.el('planning-objective').value=objective;a.el('planning-objective').listeners.change();
+    assert.equal(a.requests.length,requests);assert.equal(a.el('backtracking-settings').hidden,true);
+    assert.match(a.el('route-order-note').textContent,objective!=='time'?/estimated fuel/:/driving time/);
+    assert.doesNotMatch(a.el('route-order-note').textContent,/Invalid mileage limit/);
+    a.el('route-name').value=objective;a.click('save-route');assert.equal(a.savedRoutes()[objective].backtrackingExtraPercent,10);
+  }
+  a.calculate();assert.equal(a.requests.length,requests+1,'Hidden invalid setting does not block planning');
+});
+
+test('a marker rendering exception clears pending work and a repeated Plan click can recover',()=>{
+  const a=setup();vm.runInContext('globalThis.renderRouteMarkers=()=>{throw new Error("marker failure")}',a.context);
+  a.calculate();a.reply(0);
+  assert.equal(vm.runInContext('routeRequestPending',a.context),false);
+  assert.equal(a.el('navigation-results').hidden,true);assert.equal(vm.runInContext('routePlan',a.context),null);
+  vm.runInContext('delete globalThis.renderRouteMarkers',a.context);a.calculate();assert.equal(a.requests.length,2);a.reply(1);
+  assert.equal(a.el('navigation-results').hidden,false);
+});
+
+test('a late publishing exception restores visits and labels instead of leaving a partial reorder',()=>{
+  const a=setup();bulkStops(a,2);
+  const note=a.el('route-order-note');let text='';
+  Object.defineProperty(note,'textContent',{get:()=>text,set:value=>{if(value.startsWith('Best evaluated'))throw new Error('view failure');text=value;}});
+  a.calculate();replyRoad(a,0,{order:[1,0]});replyRoad(a,1,{miles:12});
+  assert.equal(vm.runInContext('routeRequestPending',a.context),false);assert.equal(vm.runInContext('routePlan',a.context),null);
+  assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 2']);
+  a.el('route-name').value='Recovered';a.click('save-route');assert.deepEqual(a.savedRoutes().Recovered.stopLabels,['Store 1','Store 2']);
+});
+
+test('Keep My Order ignores an invalid backtracking optimization limit',()=>{
+  const a=setup();a.el('planning-objective').value='backtracking';a.el('backtracking-extra').value='99';a.click('calculate-route');
+  assert.equal(a.requests.length,1);a.reply(0);assert.equal(a.el('navigation-results').hidden,false);
+  assert.match(a.el('route-message').textContent,/^Route calculated:/);
+});
+
+test('manual alternatives say selected, while Keep My Order never claims generated routes or reranking',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});replyRoad(a,1,{miles:30});
+  a.el('route-comparison').children[1].children[0].click();vm.runInContext('presentRouteReadout()',a.context);
+  assert.match(a.el('route-message').textContent,/^Route selected:/);assert.equal(a.el('stat-miles').textContent,'30.0');
+  a.el('vehicle-mpg').value='30';a.el('vehicle-mpg').listeners.input();assert.match(a.el('route-message').textContent,/Est. fuel: \$4.50/);
+  const b=setup();b.click('calculate-route');b.reply(0);b.el('planning-objective').value='time';b.el('planning-objective').listeners.change();
+  assert.match(b.el('route-message').textContent,/^Route calculated:/);assert.equal(b.requests.length,1);
+  const timing=b.el('route-comparison').children[0].textContent;assert.match(timing,/0 generated/);assert.doesNotMatch(timing,/Re-ranked/);
+});
+
+test('route selection buttons use the established button style and shipped scripts do not require Array.at',()=>{
+  const a=setup();bulkStops(a,2);a.calculate();replyRoad(a,0,{order:[1,0]});replyRoad(a,1);
+  assert.match(a.el('route-comparison').children[1].children[0].className,/\bbtn\b/);
+  for(const name of ['app.js','route-planning.js'])assert.doesNotMatch(readFileSync(path.join(__dirname,'..',name),'utf8'),/\.at\(/);
+});
+
+test('a missing routing module shows an error without sending requests or latching busy state',()=>{
+  const a=setup();vm.runInContext('delete globalThis.D7Planning',a.context);
+  for(const action of ['plan-route','calculate-route']) {
+    a.click(action);assert.equal(a.requests.length,0);assert.equal(vm.runInContext('routeRequestPending',a.context),false);
+    assert.match(a.el('route-message').textContent,/local routing code did not load/);
+  }
+  vm.runInContext(readFileSync(path.join(__dirname,'../route-planning.js'),'utf8'),a.context);
+  a.calculate();a.reply(0);assert.equal(a.el('navigation-results').hidden,false);
+});
+
+test('a required response-processing exception abandons the plan and allows retry',()=>{
+  const a=setup();bulkStops(a,100);
+  vm.runInContext('globalThis.savedModel=D7Planning.createModel;D7Planning.createModel=()=>{throw new Error("model fault")}',a.context);
+  a.calculate();for(let i=0;i<4;i++)assert.doesNotThrow(()=>replyWithCoordinates(a,i));
+  assert.equal(vm.runInContext('routeRequestPending',a.context),false);assert.equal(a.el('navigation-results').hidden,true);
+  vm.runInContext('D7Planning.createModel=savedModel',a.context);a.calculate();assert.equal(a.requests.length,6);
+  let i=4;while(i<a.requests.length){replyWithCoordinates(a,i++);assert.ok(i<20);}
+  assert.equal(a.el('navigation-results').hidden,false);
+});
+
+test('an optional screening exception retains a completed optimized route with an explicit warning',()=>{
+  const a=setup();bulkStops(a,2);
+  vm.runInContext('D7Planning.createModel=()=>{throw new Error("screen fault")}',a.context);
+  a.calculate();assert.doesNotThrow(()=>replyRoad(a,0,{order:[1,0]}));
+  assert.equal(vm.runInContext('routeRequestPending',a.context),false);assert.equal(a.el('navigation-results').hidden,false);
+  assert.match(a.el('route-order-note').textContent,/routing response could not be processed.*Comparison incomplete/);
+  assert.equal(a.requests.length,1);
+});
+
 function finishTwoStopTrip(a) {
   beginTrip(a);
   a.click('trip-next'); a.click('trip-next'); a.click('finish-trip');
@@ -213,7 +579,7 @@ test('trip start snapshots optimized addresses, per-leg estimates, and fuel inpu
     { distance: { value: 1609.344 }, duration: { value: 60 } },
     { distance: { value: 3218.688 }, duration: { value: 120 } },
     { distance: { value: 4828.032 }, duration: { value: 180 } },
-  ]);
+  ]); finishComparison(a);
   a.el('vehicle-mpg').value = '12'; a.el('fuel-price').value = '4';
   a.click('start-trip');
   const trip = JSON.parse(a.stored.d7TripProgress);
@@ -424,7 +790,7 @@ test('Navigate uses encoded addresses in optimized waypoint order', () => {
   a.add('Second / Oak');
   a.click('plan-route');
   // Middle stops are Start, First & Main, Second / Oak; the start field is the origin.
-  a.reply(0, 'OK', [2, 1, 0]);
+  a.reply(0, 'OK', [2, 1, 0]); finishComparison(a);
   assert.equal(a.el('navigation-results').hidden, false);
   assert.equal(a.el('navigation-controls').children[0].textContent, 'Navigate');
   a.el('navigation-controls').children[0].listeners.click();
@@ -437,7 +803,7 @@ test('Navigate uses encoded addresses in optimized waypoint order', () => {
 test('20 stops split into overlapping navigation legs with at most nine waypoints', () => {
   const a = setup();
   for (let i = 2; i <= 20; i++) a.add(`Stop ${i}`);
-  a.calculate(); a.reply(0);
+  a.calculate(); a.reply(0); finishComparison(a);
   // Start field + 20 middle stops + destination = 22 points: 9, 9, then 0 waypoints.
   const buttons = a.el('navigation-controls').children;
   assert.equal(buttons.length, 3);
@@ -465,7 +831,7 @@ test('Start from my location omits the origin parameter', () => {
 test('Start from my location omits the origin only on the first leg', () => {
   const a = setup();
   for (let i = 2; i <= 14; i++) a.add(`Stop ${i}`);
-  a.calculate(); a.reply(0);
+  a.calculate(); a.reply(0); finishComparison(a);
   a.el('start-from-location').checked = true;
   const buttons = a.el('navigation-controls').children;
   assert.equal(buttons.length, 2);
@@ -492,7 +858,7 @@ test('Navigate appears only for a current successful result', () => {
 test('next-stop progress saves, restores, moves back, and ends', () => {
   const storage = {};
   const a = setup([], { storage });
-  a.add('Middle'); a.calculate(); a.reply(0);
+  a.add('Middle'); a.calculate(); a.reply(0); finishComparison(a);
   a.click('start-trip');
   // The start field is the origin, so the first trip stop is the first middle stop.
   assert.equal(a.el('trip-stop-number').textContent, 'Stop 1 of 3');
@@ -537,7 +903,7 @@ test('edit then undo while calculating cannot restore an obsolete response', () 
 
 test('older success or failure cannot overwrite a newer success', () => {
   for (const status of ['OK', 'ZERO_RESULTS']) {
-    const a = setup(); a.calculate(); a.calculate(); a.reply(1);
+    const a = setup(); a.calculate(); a.destination('New finish'); a.calculate(); a.reply(1);
     const message = a.el('route-message').textContent;
     a.reply(0, status);
     assert.equal(a.el('route-message').textContent, message);
@@ -563,7 +929,7 @@ test('optimization still reorders stops and publishes a current route', () => {
   assert.equal(a.requests[0].options.optimizeWaypoints, true);
   assert.equal(a.requests[0].options.origin, 'Origin');
   // Middle stops are Start, A, and B. The start field stays the origin.
-  a.reply(0, 'OK', [0, 2, 1]);
+  a.reply(0, 'OK', [0, 2, 1]); finishComparison(a);
   assert.equal(a.el('stops-container').children[1].children[1].textContent, 'B');
   assert.equal(a.el('route-stale-warning').hidden, true);
   assert.ok(a.renderers[0].map);
@@ -707,7 +1073,7 @@ test('start is required, used as the route origin, and not reordered by Optimize
     [...optimizeRequest.options.waypoints.map((waypoint) => waypoint.location)],
     ['Start', 'A', 'B']
   );
-  a.reply(a.requests.length - 1, 'OK', [2, 0, 1]);
+  a.reply(a.requests.length - 1, 'OK', [2, 0, 1]); finishComparison(a);
   assert.equal(a.el('start').value, 'Depot');
   assert.equal(a.el('stops-container').children[0].children[1].textContent, 'B');
   assert.equal(a.el('stops-container').children[1].children[1].textContent, 'Start');
@@ -806,7 +1172,7 @@ test('the page still works when Places is missing', () => {
   a.add('Typed stop');
   a.destination('Typed end');
   a.calculate();
-  a.reply(0);
+  a.reply(0); finishComparison(a);
   assert.equal(a.requests[0].options.origin, 'Depot');
   assert.match(a.el('route-message').textContent, /Route optimized/);
   assert.equal(a.el('stops-container').children.at(-1).children[1].textContent, 'Typed stop');
@@ -889,7 +1255,7 @@ test('Enter in the add-stop field waits while any suggestion dropdown is open', 
 test('Optimize Route publishes the complete ordered itinerary', () => {
   const a = setup(); a.add('Second'); a.calculate();
   assert.equal(a.requests[0].options.optimizeWaypoints, true);
-  a.reply(0, 'OK', [1, 0]);
+  a.reply(0, 'OK', [1, 0]); finishComparison(a);
   assert.deepEqual(a.el('route-itinerary').children.map(x => x.textContent), [
     'Start: Origin', 'Stop 1: Second', 'Stop 2: Start', 'Finish: End'
   ]);
@@ -923,7 +1289,7 @@ test('all 20 stops are optimized together before navigation is split', () => {
   assert.equal(a.requests[0].options.optimizeWaypoints, true);
   // Moves stops across both navigation boundaries, rather than optimizing groups.
   const order = Array.from({ length: 20 }, (_, i) => 19 - i);
-  a.reply(0, 'OK', order);
+  a.reply(0, 'OK', order); finishComparison(a);
   const expected = ['Origin', ...order.map(i => i === 0 ? 'Start' : `Stop ${i + 1}`), 'End'];
   const recovered = [];
   for (const button of a.el('navigation-controls').children) button.listeners.click();
@@ -951,7 +1317,7 @@ test('mobile and iPad navigation respect the three-waypoint browser limit', () =
   ]) {
     const a = setup([], { navigatorApi });
     for (let i = 2; i <= 20; i++) a.add(`Stop ${i}`);
-    a.calculate(); a.reply(0);
+    a.calculate(); a.reply(0); finishComparison(a);
     const points = ['Origin'];
     assert.equal(a.el('navigation-controls').children.length, 6);
     for (const button of a.el('navigation-controls').children) {
@@ -1323,7 +1689,7 @@ test('active and restored trips hide planning actions while Fuel access preserve
 
 test('fuel edits refresh a current estimate without replanning or changing the selected stop order', () => {
   for (const action of ['plan-route', 'calculate-route']) {
-    const a = setup(); a.add('Second'); a.click(action); a.reply(0, 'OK', [1, 0]);
+    const a = setup(); a.add('Second'); a.click(action); a.reply(0, 'OK', [1, 0]); finishComparison(a);
     vm.runInContext('presentRouteReadout()', a.context);
     assert.equal(a.el('stat-fuel').textContent, '$3.00');
     const rows = a.el('stops-container').children.map(row => row.children[1].value);
@@ -1543,7 +1909,7 @@ test('real route coordinates create owned markers that clear on edits and restor
       start_location, end_location: positions[index + 1],
       distance: { value: 1609.344 }, duration: { value: 60 },
     }));
-    a.reply(0, 'OK', [1, 0], legs);
+    a.reply(0, 'OK', [1, 0], legs); finishComparison(a);
     assert.equal(a.markerInstances.length, 4);
     assert.deepEqual(a.markerInstances.map(marker => marker.options.title), ['Start', 'Stop 1', 'Stop 2', 'Finish']);
     assert.deepEqual(a.markerInstances.map(marker => [marker.options.position.lat, marker.options.position.lng]), [
@@ -1561,7 +1927,7 @@ test('real route coordinates create owned markers that clear on edits and restor
     assert.equal(a.renderers[0].map, null);
     assert.equal(a.el('navigation-results').hidden, true);
 
-    a.calculate(); a.reply(1); // Valid metrics but no coordinate capability.
+    a.calculate(); a.reply(a.requests.length-1); finishComparison(a); // Valid metrics but no coordinate capability.
     assert.equal(a.markerInstances.length, 4, 'No invented marker positions');
     assert.equal(a.renderers[0].options.suppressMarkers, false);
     assert.equal(a.renderers[0].map, a.mapsInstances[0]);
@@ -1609,10 +1975,10 @@ for(const count of [25,26,92,100,125,500])test(`Calculate preserves all ${count}
   assert.ok(Math.abs(snapshot.plannedMinutes-(count+1))<1e-8);
   for(let i=1;i<snapshot.legs.length;i++)assert.equal(snapshot.legs[i-1].to,snapshot.legs[i].from);
 });
-test('full-list efficiency ordering of 100 stops is evaluated in two passes without losing labels',()=>{
+test('full-list efficiency ordering evaluates two generated orders without losing labels',()=>{
   const a=setup([],{mapTheme:true});const original=bulkStops(a,100);a.click('plan-route');
   let i=0;while(i<a.requests.length){replyWithCoordinates(a,i++,{reverse:true});assert.ok(i<30);}
-  assert.equal(i,8);assert.equal(a.requests.slice(0,4).every(r=>r.options.optimizeWaypoints===false),true);
+  assert.equal(i,12);assert.equal(a.requests.slice(0,4).every(r=>r.options.optimizeWaypoints===false),true);
   const actual=[...a.el('stops-container').children].map(row=>row.children[1].value);
   assert.equal(new Set(actual).size,100);assert.deepEqual([...actual].sort(),[...original].sort());
   assert.notDeepEqual(actual,original);assert.match(a.el('route-order-note').textContent,/heuristic/);
@@ -1624,7 +1990,7 @@ test('a longer geographic candidate falls back to entered order only when it mee
   const a=setup();const original=bulkStops(a,92);a.click('plan-route');
   let i=0;while(i<a.requests.length){replyWithCoordinates(a,i,{cost:i<4?1:2});i++;}
   assert.deepEqual([...a.el('stops-container').children].map(row=>row.children[1].value),original);
-  assert.match(a.el('route-order-note').textContent,/Kept the entered order/);
+  assert.match(a.el('route-comparison').children[0].textContent,/Recommended.*Entered order/);
 });
 for(const direction of ['north','south'])test(`${direction}-first and must-do-first instructions outrank distance and survive Google's section optimization`,()=>{
   const a=setup();bulkStops(a,100);
@@ -1651,11 +2017,11 @@ test('unsupported instructions block planning without issuing requests; Keep My 
 });
 test('failure in a later section never publishes partial totals, markers, navigation or stop reorder',()=>{
   const a=setup([],{mapTheme:true});const names=bulkStops(a,92);a.click('calculate-route');
-  replyWithCoordinates(a,0);a.reply(1,'OVER_QUERY_LIMIT');
+  replyWithCoordinates(a,0);a.reply(1,'REQUEST_DENIED');
   assert.equal(a.renderers[0].map,null);assert.equal(a.markerInstances.length,0);
   assert.equal(a.el('navigation-results').hidden,true);assert.equal(a.el('stat-miles').textContent,'—');
   assert.deepEqual([...a.el('stops-container').children].map(row=>row.children[1].value),names);
-  assert.match(a.el('route-message').textContent,/OVER_QUERY_LIMIT/);
+  assert.match(a.el('route-message').textContent,/REQUEST_DENIED/);
 });
 test('edits and timeouts during later sections ignore late responses and discard all buffered sections',()=>{
   for(const action of ['edit','timeout']){
@@ -1758,4 +2124,35 @@ test('repeat import of the same selection retains manual revisions instead of re
   a.click('apply-spreadsheet');assert.equal(a.el('stops-container').children.length,2);
   assert.equal(a.el('stops-container').children[0].children[1].value,'30 Main St');
   assert.match(a.el('spreadsheet-message').textContent,/already loaded/);
+});
+
+test('nearby-area radius saves and validates backups atomically',async()=>{
+  const a=setup();a.el('planning-objective').value='backtracking';a.el('route-name').value='Areas';
+  a.el('backtracking-area').value='12';a.click('save-route');assert.equal(a.savedRoutes().Areas.backtrackingAreaMiles,12);
+  a.el('backtracking-area').value='0';a.click('save-route');assert.equal(a.savedRoutes().Areas.backtrackingAreaMiles,12);
+  a.el('saved-route-select').value='Areas';a.click('load-route');assert.equal(a.el('backtracking-area').value,'12');
+  a.click('export-routes');const backup=JSON.parse(await a.blobs.at(-1).text());
+  backup.routes.Areas.backtrackingAreaMiles=101;const json=JSON.stringify(backup),before=a.stored.d7SavedRoutes;
+  a.el('import-routes-file').files=[{size:json.length,text:async()=>json}];await a.el('import-routes-file').listeners.change();
+  assert.equal(a.stored.d7SavedRoutes,before);
+});
+
+for(const value of ['','0','101'])test(`invalid area radius ${value} blocks planning only when active`,()=>{
+  const a=setup();a.el('planning-objective').value='backtracking';a.el('backtracking-area').value=value;a.calculate();assert.equal(a.requests.length,0);
+  a.el('planning-objective').value='fuel';a.calculate();assert.ok(a.requests.length>0);
+});
+
+
+test('a negligible boundary return cannot justify nearly the entire mileage cap',()=>{
+  const a=setup();bulkStops(a,26);a.el('planning-objective').value='backtracking';a.calculate();
+  const loc=address=>({lat:0,lng:address==='Origin'?-.1:address==='End'?.5:address==='Stop 1'?0:address==='Stop 2'?.363:.36});
+  let i=0;
+  while(i<a.requests.length) {
+    const r=a.requests[i].options,path=[r.origin,...r.waypoints.map(w=>w.location),r.destination];
+    const miles=i<2?2000:2180;
+    a.reply(i++,'OK',r.waypoints.map((_,k)=>k),path.slice(1).map((to,k)=>({start_location:loc(path[k]),end_location:loc(to),distance:{value:miles*1609.344/27},duration:{value:600}})));
+    assert.ok(i<10);
+  }
+  assert.match(a.el('route-comparison').children[0].textContent,/2000.0 mi/);
+  assert.match(a.el('route-order-note').textContent,/Score differences within 5 miles or 1%/);
 });

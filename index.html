@@ -107,6 +107,20 @@
               <div class="actions"><button id="import-optimize" class="btn optimize-button" type="button" disabled>Import &amp; Plan Route</button><button id="apply-spreadsheet" class="btn" type="button" disabled>Use stops only</button></div>
             </div>
           </details>
+          <label for="planning-objective">Plan for</label>
+          <select id="planning-objective">
+            <option value="fuel">Fuel efficiency (estimated from miles / MPG)</option>
+            <option value="time">Fastest driving time</option>
+            <option value="backtracking">Less backtracking</option>
+          </select>
+          <div id="backtracking-settings" hidden>
+            <label for="backtracking-extra">Maximum extra mileage for less backtracking (%)</label>
+            <input id="backtracking-extra" type="number" min="0" max="50" step="1" value="10">
+            <label for="backtracking-area">Nearby-area radius (miles)</label>
+            <input id="backtracking-area" type="number" min="1" max="100" step="1" value="25">
+            <p class="hint">Reduce returns to visited stop areas within the mileage limit. Areas have fixed centers; start and finish are excluded. The geographic backtracking score also detects turns back toward visited ground. Small score differences favor shorter mileage. This is an estimate, not repeated-road detection.</p>
+          </div>
+          <p class="hint">Addresses can be in any order. Mark every stop that must be completed early with First; those stops are planned before the others. No weather deadlines are inferred.</p>
           <details class="route-priorities">
             <summary>Route instructions (optional)</summary>
             <label for="route-instructions">Route instructions (optional)</label>
@@ -143,7 +157,7 @@
             </button>
             <button id="calculate-route" class="btn calculate-button" type="button" aria-describedby="plan-hint">Keep My Order</button>
           </div>
-          <p id="plan-hint" class="plan-hint">Plan Route aims to reduce driving and estimated fuel across all stops. Optional instructions take priority. Keep My Order preserves your revisions. Start and Finish stay fixed. Large lists show progress while planning.</p>
+          <p id="plan-hint" class="plan-hint">Plan Route compares complete routes for your selected objective. First stops and supported instructions take priority. Keep My Order preserves your revisions. Start and Finish stay fixed.</p>
           </div>
 
           <div class="stat-grid" role="group" aria-label="Route totals">
@@ -223,9 +237,10 @@
         <p id="route-message" class="route-message" aria-live="polite"></p>
         <section id="journey-controls" class="journey-controls" aria-label="Route status and trip controls">
           <p id="route-stale-warning" class="route-message is-warn" role="status" hidden>
-            Addresses changed. Results are out of date. Plan the route again.
+            Planning inputs changed. Results are out of date. Plan the route again.
           </p>
           <p id="route-order-note" class="hint" aria-live="polite"></p>
+          <div id="route-comparison" class="hint" aria-live="polite"></div>
           <div id="navigation-results" hidden>
             <details class="itinerary-disclosure">
               <summary>Your route, in order</summary>
@@ -273,6 +288,7 @@
   <script src="map-theme.js"></script>
   <script src="vendor/exceljs.min.js"></script>
   <script src="stop-import.js"></script>
+  <script src="route-planning.js"></script>
   <script src="app.js"></script>
 <script
   async
