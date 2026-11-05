@@ -54,3 +54,15 @@ test('directed time screening uses learned road durations rather than only geome
   assert.notDeepEqual(time.indices,fuel.indices);
   assert.ok(time.predictedDuration<model.metrics(fuel.indices,'time').predictedDuration);
 });
+
+
+test('directional score catches sparse zigzags and within-area reversals without counting endpoint legs',()=>{
+  const sparse=[p(-1),...[0,8,1,7,2,6,3,5,4].map(p),p(0)];
+  assert.equal(P.backtracking(sparse).returns,0);
+  assert.ok(P.backtracking(sparse).meters>1000000);
+  assert.equal(P.backtracking([p(-1),...[0,1,2,3,4,5,6,7,8].map(p),p(0)]).meters,0);
+  const metro=[p(-1),p(0),p(.2),p(.05),p(.25),p(0)];
+  assert.equal(P.backtracking(metro).returns,0);
+  assert.ok(P.backtracking(metro).meters>30000);
+  assert.equal(P.backtracking([p(-1),p(0),p(.2),p(.2),p(.05),p(.25),p(0)]).meters,P.backtracking(metro).meters);
+});

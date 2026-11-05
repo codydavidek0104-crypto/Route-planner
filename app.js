@@ -1543,12 +1543,18 @@
         }
         candidates.push({name,key,generated:optimize && phase!=="baseline",completed,allLegs,orderedPoints,orderedIndices,distance,duration,areaReturns:detour.returns,returnMeters:detour.meters});
       }
-      let distanceLimit=Infinity;
+      let distanceLimit=Infinity,nearBestScore=Infinity;
       function compare(a,b) {
         const generatedTie=Number(b.generated)-Number(a.generated);
         if (objective === "time") return a.duration-b.duration || a.distance-b.distance || generatedTie;
         if (objective === "backtracking" && candidates.every(c=>c.returnMeters!==null)) {
-          return Number(a.distance>distanceLimit)-Number(b.distance>distanceLimit) || a.returnMeters-b.returnMeters || a.areaReturns-b.areaReturns || a.distance-b.distance || a.duration-b.duration || generatedTie;
+          const cap=Number(a.distance>distanceLimit)-Number(b.distance>distanceLimit);
+          const near=Number(a.returnMeters>nearBestScore)-Number(b.returnMeters>nearBestScore);
+          // One shared band around the best eligible score gives a transitive
+          // ordering. Within that band mileage wins over negligible differences.
+          return cap || near || (a.returnMeters<=nearBestScore && b.returnMeters<=nearBestScore
+            ? a.distance-b.distance || a.returnMeters-b.returnMeters || a.areaReturns-b.areaReturns
+            : a.returnMeters-b.returnMeters || a.areaReturns-b.areaReturns || a.distance-b.distance) || a.duration-b.duration || generatedTie;
         }
         return a.distance-b.distance || a.duration-b.duration || generatedTie;
       }
@@ -1556,6 +1562,8 @@
         if (!current()) return;
         manualSelection=false;
         distanceLimit=Math.min(...candidates.map(c=>c.distance))*(1+extraPercent/100)+1e-6;
+        const eligible=candidates.filter(c=>c.distance<=distanceLimit && c.returnMeters!==null);
+        nearBestScore=eligible.length?Math.min(...eligible.map(c=>c.returnMeters))+Math.max(5*1609.344,Math.min(...candidates.map(c=>c.distance))*.01):Infinity;
         candidates.sort(compare);
         if (!candidates.length || (optimize && !candidates.some(c=>c.generated))) { fail("Could not calculate a complete route that honors the selected requirements."); return; }
         ({completed,allLegs,orderedPoints,orderedIndices}=candidates[0]);
@@ -1635,7 +1643,7 @@
             renderStops();
           }
           document.getElementById("route-order-note").textContent = optimize
-            ? `${manualSelection?"Selected by you. Planning objective":"Best evaluated for"}: ${objective === "fuel" ? "estimated fuel" : objective === "time" ? "driving time" : "less backtracking"}. Requirements take precedence. This is a heuristic, not a guaranteed global optimum. Fuel uses fixed MPG; driving time does not predict arrival traffic. Backtracking reduces returns to visited stop areas (${areaMiles} mi radius), within ${extraPercent}% extra mileage of the shortest measured route. The geographic return score measures excursions between area visits; overlapping excursions can overlap in the score. Start and finish are excluded. It does not detect repeated roads or actual extra road miles. ${comparisonWarning} ${limitWarning}` : "Kept your exact entered order.";
+            ? `${manualSelection?"Selected by you. Planning objective":"Best evaluated for"}: ${objective === "fuel" ? "estimated fuel" : objective === "time" ? "driving time" : "less backtracking"}. Requirements take precedence. This is a heuristic, not a guaranteed global optimum. Fuel uses fixed MPG; driving time does not predict arrival traffic. Backtracking reduces returns to visited stop areas (${areaMiles} mi radius), within ${extraPercent}% extra mileage of the shortest measured route. The geographic return score uses the larger of area excursions and distance-weighted turns back toward visited ground, including within one area. Overlapping excursions can overlap in the score. Score differences within 5 miles or 1% of the shortest measured mileage (whichever is larger) favor shorter mileage. Start and finish are excluded. It does not detect repeated roads or actual extra road miles. ${comparisonWarning} ${limitWarning}` : "Kept your exact entered order.";
           if(elapsed===null)elapsed=((Date.now()-planningStarted)/1000).toFixed(1);
           refreshRouteComparison=()=>{
             const comparison = document.getElementById("route-comparison");
@@ -1647,7 +1655,7 @@
               const fuel=estimatedFuelCost(Number(miles.toFixed(1)));
               const rawGallons=positiveNumber(vehicleMpgInput.value) ? miles/Number(vehicleMpgInput.value) : NaN;
               const gallons=Number.isFinite(rawGallons)?rawGallons:null;
-              row.textContent=`${i===0?(manualSelection?"Selected":"Recommended"):"Alternative "+i} · ${candidate.name}: ${miles.toFixed(1)} mi · ${Math.round(candidate.duration/60)} min${gallons===null?"":` · ${gallons.toFixed(1)} gal est.`}${fuel===null?"":` · $${fuel.toFixed(2)} est.`} · ${candidate.areaReturns===null?"backtracking unavailable":candidate.areaReturns+" area returns, "+(candidate.returnMeters/1609.344).toFixed(1)+" mi geographic return score"}${objective==="backtracking" && candidate.distance>distanceLimit?" · Outside extra-mileage limit":""}`;
+              row.textContent=`${i===0?(manualSelection?"Selected":"Recommended"):"Alternative "+i} · ${candidate.name}: ${miles.toFixed(1)} mi · ${Math.round(candidate.duration/60)} min${gallons===null?"":` · ${gallons.toFixed(1)} gal est.`}${fuel===null?"":` · $${fuel.toFixed(2)} est.`} · ${candidate.areaReturns===null?"backtracking unavailable":candidate.areaReturns+" area returns, "+(candidate.returnMeters/1609.344).toFixed(1)+" mi geographic backtracking score"}${objective==="backtracking" && candidate.distance>distanceLimit?" · Outside extra-mileage limit":""}`;
               if (optimize && i>0) {
                 const choose=document.createElement("button");choose.type="button";choose.className="btn route-choice";choose.textContent="Use this route";
                 choose.disabled=!!tripProgress;routeAlternativeButtons.push(choose);
@@ -1836,7 +1844,10 @@
               // or a visibly poor alternative just to inflate candidate counts.
               // Small jobs need a predicted improvement to justify extra latency.
               const threshold=requestedStops.length<=25?0.995:1.15;
-              const alternative=pool.find(c=>!measured.has(key(c.indices)) && c.score<currentScore*threshold);
+              const shortest=candidates.reduce((best,c)=>!best || c.distance<best.distance?c:best,null);
+              const proxyLimit=shortest?model.metrics(shortest.orderedIndices,"fuel").distance*(1+extraPercent/100):Infinity;
+              const alternative=pool.find(c=>!measured.has(key(c.indices)) && c.score<currentScore*threshold &&
+                (objective!=="backtracking" || c.distance<=proxyLimit));
               if(!alternative){comparisonReason="Local screening found no distinct candidate worth an additional mapping request.";finishComparison();return;}
               phase="comparison";
               completed=[];allLegs=[];orderedPoints=[origin];orderedIndices=[];

@@ -415,8 +415,10 @@ test('area-return mileage guard and radius rerank cached routes without requests
   a.el('backtracking-extra').value='20';a.el('backtracking-extra').listeners.change();
   assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 3','Stop 2']);
   assert.match(a.el('route-comparison').children[0].textContent,/0 area returns/);
+  a.el('backtracking-extra').value='0';a.el('backtracking-extra').listeners.change();
   a.el('backtracking-area').value='1';a.el('backtracking-area').listeners.change();
   assert.deepEqual(a.el('stops-container').children.map(row=>row.children[1].value),['Stop 1','Stop 2','Stop 3']);
+  assert.match(a.el('route-comparison').children[0].textContent,/0 area returns/);
   assert.equal(a.requests.length,2);
 });
 
@@ -2138,4 +2140,19 @@ test('nearby-area radius saves and validates backups atomically',async()=>{
 for(const value of ['','0','101'])test(`invalid area radius ${value} blocks planning only when active`,()=>{
   const a=setup();a.el('planning-objective').value='backtracking';a.el('backtracking-area').value=value;a.calculate();assert.equal(a.requests.length,0);
   a.el('planning-objective').value='fuel';a.calculate();assert.ok(a.requests.length>0);
+});
+
+
+test('a negligible boundary return cannot justify nearly the entire mileage cap',()=>{
+  const a=setup();bulkStops(a,26);a.el('planning-objective').value='backtracking';a.calculate();
+  const loc=address=>({lat:0,lng:address==='Origin'?-.1:address==='End'?.5:address==='Stop 1'?0:address==='Stop 2'?.363:.36});
+  let i=0;
+  while(i<a.requests.length) {
+    const r=a.requests[i].options,path=[r.origin,...r.waypoints.map(w=>w.location),r.destination];
+    const miles=i<2?2000:2180;
+    a.reply(i++,'OK',r.waypoints.map((_,k)=>k),path.slice(1).map((to,k)=>({start_location:loc(path[k]),end_location:loc(to),distance:{value:miles*1609.344/27},duration:{value:600}})));
+    assert.ok(i<10);
+  }
+  assert.match(a.el('route-comparison').children[0].textContent,/2000.0 mi/);
+  assert.match(a.el('route-order-note').textContent,/Score differences within 5 miles or 1%/);
 });

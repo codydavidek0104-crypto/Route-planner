@@ -118,7 +118,7 @@
             <input id="backtracking-extra" type="number" min="0" max="50" step="1" value="10">
             <label for="backtracking-area">Nearby-area radius (miles)</label>
             <input id="backtracking-area" type="number" min="1" max="100" step="1" value="25">
-            <p class="hint">Reduce returns to visited stop areas within the mileage limit. Areas have fixed centers; start and finish are excluded. The geographic return score is an estimate, not repeated-road detection.</p>
+            <p class="hint">Reduce returns to visited stop areas within the mileage limit. Areas have fixed centers; start and finish are excluded. The geographic backtracking score also detects turns back toward visited ground. Small score differences favor shorter mileage. This is an estimate, not repeated-road detection.</p>
           </div>
           <p class="hint">Addresses can be in any order. Mark every stop that must be completed early with First; those stops are planned before the others. No weather deadlines are inferred.</p>
           <details class="route-priorities">

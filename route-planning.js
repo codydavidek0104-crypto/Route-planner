@@ -14,6 +14,13 @@
     const v = Math.sin((a.lat-b.lat)*radians/2)**2 + Math.cos(a.lat*radians)*Math.cos(b.lat*radians)*Math.sin(wrap(a.lng-b.lng)*radians/2)**2;
     return 12742000 * Math.asin(Math.sqrt(Math.min(1,Math.max(0,v))));
   }
+  function directionalReturn(a,b,c) {
+    const scale=Math.cos(b.lat*radians);
+    const x=[wrap(b.lng-a.lng)*scale,b.lat-a.lat],y=[wrap(c.lng-b.lng)*scale,c.lat-b.lat];
+    const length=Math.hypot(...x)*Math.hypot(...y);
+    const cosine=length?Math.max(-1,Math.min(1,(x[0]*y[0]+x[1]*y[1])/length)):1;
+    return cosine < -1e-9?Math.min(distance(a,b),distance(b,c))*-cosine:0;
+  }
   // Areas use fixed centers in coordinate order, so neither route order nor
   // a chain of nearby stops can silently enlarge an area. Endpoints are excluded.
   function createAreaScorer(points, metric) {
@@ -43,7 +50,14 @@
         }
         last.set(area,{id,path});active=area;previous=id;
       }
-      return {returns,meters};
+      // Also count heading back toward the preceding visited ground, including
+      // sparse routes and turns wholly inside an area. Ignore endpoints and
+      // consecutive colocated visits, which must not hide a heading reversal.
+      const distinct=[];
+      for(const index of order){const id=index+1;if(!distinct.length || geo(id,distinct[distinct.length-1])>1)distinct.push(id);}
+      let directionalMeters=0;
+      for(let i=1;i<distinct.length-1;i++)directionalMeters+=directionalReturn(points[distinct[i-1]],points[distinct[i]],points[distinct[i+1]]);
+      return {returns,meters:Math.max(meters,directionalMeters)};
     }
     return {score,labels};
   }
